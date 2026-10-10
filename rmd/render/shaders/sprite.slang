@@ -88,7 +88,8 @@ func apply_focus_brightness(f32x4 color, f32 brightness) -> f32x4 {
     return f32x4(color.rgb * brightness, color.a);
 }
 
-func sample_sprite(VSOutput input) -> f32x4 {
+// gamma returns raw texel values so blending matches byond
+func sample_sprite_I_FUCKING_HATE_BYOND(VSOutput input, bool gamma) -> f32x4 {
     if (input.sprite_id == 0) {
         discard;
     }
@@ -96,6 +97,7 @@ func sample_sprite(VSOutput input) -> f32x4 {
     let sprite = sprites[input.sprite_id - 1];
     let flags = sprite.flags();
     let color = sprite.color();
+    let brightness = gamma ? linear_to_srgb(f32x3(input.focus_brightness)).x : input.focus_brightness;
     if ((flags & SPRITE_AREA_EDGE_MASK) != 0) {
         let pixel = fwidth(input.local);
         let on_outline =
@@ -109,7 +111,7 @@ func sample_sprite(VSOutput input) -> f32x4 {
 
         return apply_focus_brightness(
             apply_placement_flash(color, input.placement_flash_strength),
-            input.focus_brightness
+            brightness
         );
     }
 
@@ -118,7 +120,11 @@ func sample_sprite(VSOutput input) -> f32x4 {
     u32 texture_height;
     textures[texture_index].GetDimensions(texture_width, texture_height);
     let uv = input.uv / f32x2(texture_width, texture_height);
-    let texel = textures[texture_index].Sample(uv);
+    var texel = textures[texture_index].Sample(uv);
+    if (gamma) {
+        texel.rgb = linear_to_srgb(texel.rgb);
+    }
+
     let shaded = f32x4(texel.rgb * color.rgb * texel.a, texel.a * color.a);
 
     if (shaded.a <= 0.0) {
@@ -127,7 +133,7 @@ func sample_sprite(VSOutput input) -> f32x4 {
 
     return apply_focus_brightness(
         apply_placement_flash(shaded, input.placement_flash_strength),
-        input.focus_brightness
+        brightness
     );
 }
 
@@ -152,7 +158,7 @@ func fs_main(VSOutput input) -> f32x4 {
         }
     }
 
-    return sample_sprite(input);
+    return sample_sprite_I_FUCKING_HATE_BYOND(input, false);
 }
 
 struct SceneOutput {
@@ -176,7 +182,7 @@ func fs_scene(VSOutput input) -> SceneOutput {
     }
 
     SceneOutput output;
-    let color = sample_sprite(input);
+    let color = sample_sprite_I_FUCKING_HATE_BYOND(input, true);
     let mask = (flags & SPRITE_FLAG_EMISSIVE_MASK) != 0;
     let blocker = (flags & SPRITE_FLAG_EMISSIVE_BLOCKER) != 0;
     output.color = mask || blocker ? f32x4(0.0) : color;
@@ -199,7 +205,7 @@ func fs_visibility(VSOutput input) -> u32 {
         discard;
     }
 
-    let color = sample_sprite(input);
+    let color = sample_sprite_I_FUCKING_HATE_BYOND(input, false);
     if (color.a <= 0.0) {
         discard;
     }
@@ -220,8 +226,7 @@ func fs_overlay_light(VSOutput input) -> f32x4 {
         discard;
     }
 
-    let color = sample_sprite(input);
-    let straight = color.a > 0.0 ? color.rgb / color.a : f32x3(0.0);
-    let gamma = linear_to_srgb(straight) * color.a;
-    return f32x4(gamma * (subtract ? -1.0 : 1.0), color.a);
+    let color = sample_sprite_I_FUCKING_HATE_BYOND(input, true);
+
+    return f32x4(color.rgb * (subtract ? -1.0 : 1.0), color.a);
 }

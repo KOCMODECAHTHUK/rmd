@@ -37,6 +37,17 @@ func vs_main(u32 vertex_id: SV_VertexID) -> VSOutput {
     return output;
 }
 
+func to_linear(f32x4 color) -> f32x4 {
+    let straight = color.a > 0.0 ? color.rgb / color.a : f32x3(0.0);
+
+    return f32x4(srgb_to_linear(straight) * color.a, color.a);
+}
+
+[shader("fragment")]
+func fs_resolve(VSOutput input) -> f32x4 {
+    return to_linear(scene.Load(i32x3(i32x2(input.position.xy), 0)));
+}
+
 [shader("fragment")]
 func fs_main(
     VSOutput input,
@@ -55,7 +66,7 @@ func fs_main(
     let overlay_light = overlay_lightmap.Load(pixel).rgb;
     let level = u32(round(rendered_levels.Load(pixel) * LEVEL_DEPTH_SCALE));
     if (zoom <= 0.0 || tile_size <= 0.0 || level == 0 || level > level_count) {
-        return color;
+        return to_linear(color);
     }
 
     let world = center + f32x2((input.uv.x - 0.5) * viewport.x / zoom,
@@ -63,7 +74,7 @@ func fs_main(
     let tile = i32x2(floor(world / tile_size));
     if (tile.x < 0 || tile.y < 0 || tile.x >= i32(map_size.x) ||
         tile.y >= i32(map_size.y)) {
-        return color;
+        return to_linear(color);
     }
 
     let plane = map_size.x * map_size.y;
@@ -86,7 +97,7 @@ func fs_main(
     }
     let factor = lerp(displayed_light, f32x3(1.0), emission);
     let straight = color.a > 0.0 ? color.rgb / color.a : f32x3(0.0);
-    let lit = srgb_to_linear(linear_to_srgb(straight) * factor) * color.a;
+    let lit = srgb_to_linear(straight * factor) * color.a;
 
     return f32x4(lit, color.a);
 }

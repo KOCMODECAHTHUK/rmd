@@ -28,7 +28,11 @@ const MODULES: [(&str, &[(&str, &str)]); 9] = [
     ),
     (
         "lighting.slang",
-        &[("vs_main", "lighting.vert.spv"), ("fs_main", "lighting.frag.spv")],
+        &[
+            ("vs_main", "lighting.vert.spv"),
+            ("fs_main", "lighting.frag.spv"),
+            ("fs_resolve", "scene_resolve.frag.spv"),
+        ],
     ),
     ("area_color.slang", &[("cs_main", "area_color.comp.spv")]),
     (

@@ -74,6 +74,7 @@ const GUIDE_VS_SPV: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/guide.vert
 const GUIDE_FS_SPV: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/guide.frag.spv"));
 const LIGHTING_VS_SPV: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/lighting.vert.spv"));
 const LIGHTING_FS_SPV: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/lighting.frag.spv"));
+const SCENE_RESOLVE_FS_SPV: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/scene_resolve.frag.spv"));
 const BLUR_VS_SPV: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/blur.vert.spv"));
 const BLUR_FS_SPV: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/blur.frag.spv"));
 const PICK_CS_SPV: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/pick.comp.spv"));
@@ -761,6 +762,7 @@ pub struct Renderer {
     overlay_light_pipeline: PipelineId,
     cull_pipelines: [PipelineId; 3],
     lighting_pipeline: PipelineId,
+    resolve_pipeline: PipelineId,
     blur_pipeline: PipelineId,
     interaction_pipeline: PipelineId,
     guide_pipeline: PipelineId,
@@ -911,6 +913,19 @@ impl Renderer {
                 return Err(error.into());
             },
         };
+        let resolve_pipeline = match graph.declare_pipeline(
+            GraphicsPipelineInfo::new()
+                .with_shader(&read_spirv(LIGHTING_VS_SPV)?)
+                .with_shader(&read_spirv(SCENE_RESOLVE_FS_SPV)?),
+        ) {
+            Ok(pipeline) => pipeline,
+            Err(error) => {
+                drop(graph);
+                bindless.destroy(&device);
+
+                return Err(error.into());
+            },
+        };
         let blur_pipeline = match graph.declare_pipeline(
             GraphicsPipelineInfo::new()
                 .with_shader(&read_spirv(BLUR_VS_SPV)?)
@@ -981,6 +996,7 @@ impl Renderer {
             overlay_light_pipeline,
             cull_pipelines,
             lighting_pipeline,
+            resolve_pipeline,
             blur_pipeline,
             interaction_pipeline,
             guide_pipeline,
@@ -1333,9 +1349,10 @@ impl Renderer {
         show_areas: bool, show_area_outlines: bool, blur_underlays: bool, name: &str,
     ) -> MapScene {
         let extent = module.declare_extent_3d_var(&format!("{name} extent"), extent3d(viewport));
+        // sprites blend in gamma space like byond, lighting or resolve converts to srgb
         let mut scene_attachment = module.transient_image_sized(
-            &ImageInfo::color_target(viewport, vk::Format::R8G8B8A8_SRGB)
-                .with_usage(vk::ImageUsageFlags::SAMPLED | vk::ImageUsageFlags::TRANSFER_SRC)
+            &ImageInfo::color_target(viewport, vk::Format::R8G8B8A8_UNORM)
+                .with_usage(vk::ImageUsageFlags::SAMPLED)
                 .with_name(format!("{name} scene attachment")),
             extent,
         );
@@ -1386,7 +1403,7 @@ impl Renderer {
 
         if blur_underlays {
             let mut underlay_attachment = module.transient_image_sized(
-                &ImageInfo::color_target(viewport, vk::Format::R8G8B8A8_SRGB)
+                &ImageInfo::color_target(viewport, vk::Format::R8G8B8A8_UNORM)
                     .with_usage(vk::ImageUsageFlags::SAMPLED)
                     .with_name(format!("{name} underlay attachment")),
                 extent,
@@ -1551,6 +1568,26 @@ impl Renderer {
 
             Some(LightingSlots { push })
         } else {
+            let mut resolved_attachment = module.transient_image_sized(
+                &ImageInfo::color_target(viewport, vk::Format::R8G8B8A8_SRGB)
+                    .with_usage(vk::ImageUsageFlags::SAMPLED | vk::ImageUsageFlags::TRANSFER_SRC)
+                    .with_name(format!("{name} resolved scene attachment")),
+                extent,
+            );
+            resolved_attachment = module.clear(resolved_attachment, vir::clear::f32::BLACK);
+            [resolved_attachment] = module
+                .begin_rendering([(resolved_attachment, Access::ColorRW)])
+                .with_name(format!("{name} scene resolve"))
+                .bind_graphics_pipeline(self.resolve_pipeline)
+                .set_primitive_topology(vk::PrimitiveTopology::TRIANGLE_LIST)
+                .set_viewport(0, Rect2D::framebuffer())
+                .set_scissor(0, Rect2D::framebuffer())
+                .broadcast_color_blend(BlendPreset::Off)
+                .bind_image(0, 0, scene_attachment)
+                .draw(3, 1)
+                .end_rendering();
+            scene_attachment = resolved_attachment;
+
             None
         };
 
@@ -3566,6 +3603,7 @@ mod tests {
         LightingPush,
         PICK_CS_SPV,
         PickPush,
+        SCENE_RESOLVE_FS_SPV,
         SPRITE_CULL_CLASSIFY_CS_SPV,
         SPRITE_CULL_COMPACT_CS_SPV,
         SPRITE_CULL_SCAN_CS_SPV,
@@ -4372,6 +4410,20 @@ mod tests {
         assert_eq!(bindings, [(0, 0), (0, 1), (0, 2), (0, 3), (0, 4)]);
         assert_eq!(reflection.push_constant_offset, 0);
         assert_eq!(reflection.push_constant_size as usize, size_of::<LightingPush>());
+    }
+
+    #[test]
+    fn scene_resolve_shader_reads_only_the_scene() {
+        let reflection =
+            shader::reflect(&read_spirv(SCENE_RESOLVE_FS_SPV).expect("valid SPIR-V")).expect("shader reflects");
+        let bindings = reflection
+            .bindings
+            .iter()
+            .map(|binding| (binding.set, binding.binding))
+            .collect::<Vec<_>>();
+
+        assert_eq!(bindings, [(0, 0)]);
+        assert_eq!(reflection.push_constant_size, 0);
     }
 
     #[test]
