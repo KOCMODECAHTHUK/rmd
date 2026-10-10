@@ -128,6 +128,8 @@ pub(super) fn draw_top_overlay(ui: &Ui, session: &mut Session, bounds: OverlayRe
     ui.same_line();
     draw_tool_button(ui, session, keybindings, Tool::Replace);
     ui.same_line();
+    draw_tool_button(ui, session, keybindings, Tool::RectFill);
+    ui.same_line();
     let tools_end = draw_fill_tool_button(
         ui,
         session,
@@ -160,10 +162,11 @@ fn draw_block_select_tool_button(
     let separator_min_y = ui.item_rect_min()[1];
     let separator_max_y = ui.item_rect_max()[1];
     ui.set_item_tooltip(format!(
-        "Rectangle selection ({})\nDrag: {} {ICON_CIRCLE_SMALL} Hold Shift while drawing: Border\nShift+gizmo or edge \
-         handles: resize",
+        "Rectangle selection ({})\nDrag: {} {ICON_CIRCLE_SMALL} Hold Shift while drawing: Border\nDrag the selection \
+         to move it, Ctrl+drag to copy, edge handles to resize\nClick outside to clear {ICON_CIRCLE_SMALL} {}: rotate",
         keybindings.get(KeybindAction::BlockSelectTool).label(ui),
-        options.label()
+        options.label(),
+        keybindings.get(KeybindAction::Rotate).label(ui)
     ));
     ui.same_line();
 
@@ -198,7 +201,7 @@ fn draw_block_select_tool_button(
     if let Some(_popup) = ui.begin_popup(POPUP) {
         ui.with_disabled_if(selection_busy, || draw_selection_mode_controls(ui, session, options));
         ui.text("Hold Shift while drawing for Border.");
-        ui.text("Drag edge handles or Shift+gizmo to resize.");
+        ui.text("Drag edge handles to resize.");
         if selection_busy {
             ui.text("Finish or cancel the current gesture to change mode.");
         }
@@ -227,7 +230,7 @@ fn draw_fill_tool_button(
         keybindings.get(KeybindAction::FillTool).label(ui),
         fill_mode.label(),
         if session.selection().is_some() {
-            "Fills connected selected tiles. Clear selection to fill elsewhere"
+            "Fills connected selected tiles. Press Escape to clear the selection and fill elsewhere"
         } else {
             "Click to fill a connected region"
         }
@@ -360,6 +363,10 @@ fn draw_tool_button(ui: &Ui, session: &mut Session, keybindings: KeyBindings, to
         Tool::Fill => (
             KeybindAction::FillTool,
             String::from("Click to fill a connected region"),
+        ),
+        Tool::RectFill => (
+            KeybindAction::RectFillTool,
+            String::from("Drag to fill a rectangle with the brush\nHold Shift while drawing: Border"),
         ),
         Tool::Comment => (
             KeybindAction::CommentTool,

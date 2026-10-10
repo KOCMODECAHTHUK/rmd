@@ -13,9 +13,7 @@ use render::MapViewInteraction;
 use super::{
     MapViewState,
     OverlayRect,
-    PlacementControls,
     UiState,
-    block_placement_controls_layout,
     conflict_controls_layout,
     menu::MenuActions,
     overlay_padding,
@@ -151,8 +149,6 @@ pub(super) struct RectangleUiHarness {
     pub(super) settings: Settings,
     pub(super) view: MapViewState,
     pub(super) id: DocumentId,
-    pub(super) fill_button: Option<[f32; 2]>,
-    pub(super) mode_buttons: Option<([f32; 2], [f32; 2])>,
     pub(super) conflict_button: Option<[f32; 2]>,
     pub(super) focus_other_window: bool,
     pub(super) is_modal_open: bool,
@@ -199,8 +195,6 @@ impl RectangleUiHarness {
             settings: Settings::default(),
             view,
             id,
-            fill_button: None,
-            mode_buttons: None,
             conflict_button: None,
             focus_other_window: false,
             is_modal_open: false,
@@ -254,7 +248,6 @@ impl RectangleUiHarness {
             },
         );
 
-        self.fill_button = None;
         self.conflict_button = None;
         if let Some(region) = self.session.conflict_regions(self.id, Some(self.session.z())).first() {
             let min = [self.view.rect.x as f32, self.view.rect.y as f32];
@@ -284,47 +277,6 @@ impl RectangleUiHarness {
                 ]);
             }
         }
-        if let Some(selection) = self.session.selection() {
-            let min = [self.view.rect.x as f32, self.view.rect.y as f32];
-            let max = [
-                min[0] + self.view.rect.width as f32,
-                min[1] + self.view.rect.height as f32,
-            ];
-            let controls = OverlayRect {
-                min: [min[0], min[1] + ui.frame_height() + 2.0 * overlay_padding(ui)],
-                max: [max[0], max[1] - recent_button_size(ui) - 2.0 * overlay_padding(ui)],
-            };
-            let (position, _) = block_placement_controls_layout(
-                ui,
-                &self.view.camera,
-                PlacementControls::Block,
-                selection,
-                self.session.options.tile_size,
-                min,
-                controls,
-            );
-            let style = ui.clone_style();
-            let row_height = ui.frame_height() + style.item_spacing()[1];
-            let button_width = |label: &str| ui.calc_text_size(label)[0] + style.frame_padding()[0] * 2.0;
-            self.fill_button = Some([
-                position[0]
-                    + button_width("Move")
-                    + button_width("Copy")
-                    + 2.0 * style.item_spacing()[0]
-                    + button_width("Fill selection") * 0.5,
-                position[1] + 2.0 * row_height + ui.frame_height() * 0.5,
-            ]);
-            let radio_width =
-                |label: &str| ui.frame_height() + style.item_inner_spacing()[0] + ui.calc_text_size(label)[0];
-            self.mode_buttons = Some((
-                [position[0] + 5.0, position[1] + row_height + 5.0],
-                [
-                    position[0] + radio_width("Border") + style.item_spacing()[0] + 5.0,
-                    position[1] + row_height + 5.0,
-                ],
-            ));
-        }
-
         assert!(self.context.render_legacy().valid());
     }
 
@@ -340,6 +292,13 @@ impl RectangleUiHarness {
         self.context.io_mut().add_mouse_pos_event(point);
         self.context.io_mut().add_mouse_button_event(MouseButton::Left, down);
         self.step();
+    }
+
+    pub(super) fn drag(&mut self, from: [f32; 2], to: [f32; 2]) {
+        self.pointer(from, false);
+        self.pointer(from, true);
+        self.pointer(to, true);
+        self.pointer(to, false);
     }
 
     pub(super) fn click(&mut self, point: [f32; 2]) {

@@ -28,7 +28,6 @@ pub(crate) struct PlacementPreview {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum BlockPreviewSource {
     Selection(SelectionMask),
-    Clipboard,
     Conflict { region: u64, side: Side },
 }
 
@@ -37,7 +36,6 @@ pub(super) struct BlockPreviewKey {
     source: BlockPreviewSource,
     rotation: SelectionRotation,
     pub(super) document_revision: u64,
-    clipboard_revision: u64,
     texture_revision: u64,
     tile_size: u32,
     show_areas: bool,
@@ -77,11 +75,6 @@ impl Session {
             source,
             rotation,
             document_revision: cache.revision,
-            clipboard_revision: if source == BlockPreviewSource::Clipboard {
-                self.state.clipboard_revision()
-            } else {
-                0
-            },
             texture_revision: self.texture_revision,
             tile_size: self.options.tile_size,
             show_areas: self.options.show_areas,
@@ -94,9 +87,6 @@ impl Session {
                     .map_or_else(Vec::new, |target| {
                         self.block_preview_sprites(mask.bounds, target, rotation, mask.mode)
                     }),
-                BlockPreviewSource::Clipboard => self
-                    .clipboard_footprint(origin, rotation)
-                    .map_or_else(Vec::new, |target| self.clipboard_preview_sprites(target, rotation)),
                 BlockPreviewSource::Conflict { region, side } => self.conflict_preview_sprites(id, region, side),
             };
             let revision = self.next_preview_revision;
@@ -138,28 +128,6 @@ impl Session {
             };
             for placed in tile {
                 previews.extend(self.preview_sprite(environment, placed.id(), placed.prefab(), destination, rotation));
-            }
-        }
-
-        previews.sort_by(|left, right| left.depth.total_cmp(&right.depth));
-
-        previews
-    }
-
-    pub(crate) fn clipboard_preview_sprites(
-        &self, target: Selection, rotation: SelectionRotation,
-    ) -> Vec<SpriteInstance> {
-        let Some(environment) = self.state.environment.as_ref() else {
-            return Vec::new();
-        };
-        let Some(block) = self.state.clipboard() else {
-            return Vec::new();
-        };
-
-        let mut previews = Vec::new();
-        for (destination, tile) in block.destinations(target, rotation) {
-            for prefab in tile {
-                previews.extend(self.preview_sprite(environment, PREVIEW_OWNER, prefab, destination, rotation));
             }
         }
 

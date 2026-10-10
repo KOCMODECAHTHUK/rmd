@@ -122,18 +122,6 @@ impl Session {
 
     pub fn clipboard(&self) -> Option<&TileBlock> { self.state.clipboard() }
 
-    pub fn clipboard_footprint(&self, min: Coord, rotation: SelectionRotation) -> Option<Selection> {
-        self.state.clipboard()?.footprint(min, rotation)
-    }
-
-    pub fn clipboard_selection_mask(&self, min: Coord, rotation: SelectionRotation) -> Option<SelectionMask> {
-        let block = self.state.clipboard()?;
-        Some(SelectionMask {
-            bounds: self.clipboard_footprint(min, rotation)?,
-            mode: block.selection_mode(),
-        })
-    }
-
     pub fn can_paste_clipboard(&self, min: Coord, rotation: SelectionRotation) -> bool {
         let Some(block) = self.state.clipboard() else {
             return false;
@@ -159,16 +147,13 @@ impl Session {
             return false;
         };
 
-        if !self.commit(action, None) {
-            return false;
-        }
-
-        if let Some(document) = self.state.active_document_mut() {
-            document.set_selection(Some(target), selection_mode);
-            document.select_instance(None);
-        }
-
-        true
+        self.commit_selecting(
+            action,
+            SelectionMask {
+                bounds: target,
+                mode: selection_mode,
+            },
+        )
     }
 }
 
@@ -311,7 +296,7 @@ mod tests {
                 session.state.choose_prefab(red.clone());
                 session.set_tool(Tool::BlockSelect);
                 assert!(session.select_block_with_mode(Some(source), mode));
-                assert!(session.fill_selected_block(source.min, SelectionRotation::Original, mode));
+                assert!(session.fill_rect(SelectionMask { bounds: source, mode }));
                 assert!(session.copy_selection(session.selection_mode()));
                 let copied = session.clipboard().unwrap().clone();
                 let source_grid = session.map().unwrap().clone();
@@ -328,7 +313,7 @@ mod tests {
                 let second = session.activate_document(MapDocument::new(map, 2));
                 let destination_grid = session.map().unwrap().clone();
                 let min = Coord::new(4, 4, 2);
-                let target = session.clipboard_footprint(min, rotation).unwrap();
+                let target = copied.footprint(min, rotation).unwrap();
                 let before = target
                     .iter()
                     .map(|coord| {
@@ -339,10 +324,6 @@ mod tests {
                     })
                     .collect::<std::collections::HashMap<_, _>>();
                 assert_eq!(session.selection_mask(), None);
-                assert_eq!(
-                    session.clipboard_preview_sprites(target, rotation).len(),
-                    mode.tiles(source).count()
-                );
                 assert!(session.paste_clipboard(min, rotation));
                 for coord in target.iter() {
                     let document = session.state.active_document().unwrap();

@@ -7,7 +7,6 @@ use crate::{
     session::Session,
     settings::{KeybindAction, Settings},
     ui::{
-        PendingPaste,
         UiState,
         centered_paste_min,
         context_menu::{Action as MenuAction, NodeContext, draw_popup as draw_map_menu},
@@ -38,9 +37,7 @@ impl UiState {
             Some(EditCommand::Copy) => {
                 session.copy_selection(session.selection_mode());
             },
-            Some(command @ (EditCommand::Cut | EditCommand::Delete))
-                if frame.gestures.paste.is_none() && session.selection().is_some() =>
-            {
+            Some(command @ (EditCommand::Cut | EditCommand::Delete)) if session.selection().is_some() => {
                 frame.gestures.cancel(session, frame.id);
                 self.gizmo.cancel();
 
@@ -65,10 +62,10 @@ impl UiState {
                     self.gizmo.cancel();
                     frame.gestures.block_placement = None;
                     frame.gestures.block_selection_anchor = None;
-                    frame.gestures.paste = Some(PendingPaste {
-                        min: centered_paste_min(width, height, anchor, size),
-                        rotation: SelectionRotation::Original,
-                    });
+                    session.paste_clipboard(
+                        centered_paste_min(width, height, anchor, size),
+                        SelectionRotation::Original,
+                    );
                 }
             },
             Some(EditCommand::Deselect) => {
@@ -97,9 +94,9 @@ impl UiState {
         if gestures.rectangle_gesture.is_some() {
             restore_rectangle_gesture(session, frame.id, &mut gestures.rectangle_gesture);
             gestures.block_selection_anchor = None;
-        } else if gestures.block_placement.is_some() || gestures.paste.is_some() {
+        } else if gestures.block_placement.is_some() || gestures.fill_anchor.is_some() {
             gestures.block_placement = None;
-            gestures.paste = None;
+            gestures.fill_anchor = None;
         } else if matches!(tool, Tool::BlockSelect | Tool::Fill) {
             session.select_block(None);
         }

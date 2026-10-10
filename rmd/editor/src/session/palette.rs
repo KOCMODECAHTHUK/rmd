@@ -123,7 +123,7 @@ impl Session {
         };
 
         self.state.choose_prefab(prefab);
-        if !matches!(self.state.tool, Tool::Fill | Tool::BlockSelect) {
+        if !matches!(self.state.tool, Tool::Fill | Tool::RectFill | Tool::BlockSelect) {
             self.state.tool = Tool::Place;
         }
 
@@ -134,7 +134,7 @@ impl Session {
         if !self.state.choose_recent(index) {
             return false;
         }
-        if !matches!(self.state.tool, Tool::Fill | Tool::BlockSelect) {
+        if !matches!(self.state.tool, Tool::Fill | Tool::RectFill | Tool::BlockSelect) {
             self.state.tool = Tool::Place;
         }
 
@@ -301,7 +301,7 @@ mod tests {
             .id_of(&TreePath::parse("/turf/open/floor"))
             .unwrap();
 
-        for tool in [Tool::Fill, Tool::BlockSelect] {
+        for tool in [Tool::Fill, Tool::RectFill, Tool::BlockSelect] {
             session.set_tool(tool);
             assert!(session.choose_type(floor));
             assert_eq!(session.tool(), tool);

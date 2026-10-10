@@ -13,7 +13,7 @@ use net::{LevelChange, LevelContents};
 use objtree::ObjectTree;
 
 use crate::{
-    command::{self, Edit, EditGroupId, History, LevelEdit, Resize},
+    command::{self, Edit, EditGroupId, History, LevelEdit, Resize, SelectionChange},
     focus::AreaFocus,
     grid::{Grid, LevelCells},
     patch,
@@ -551,6 +551,14 @@ impl MapDocument {
 
     pub fn selection(&self) -> Option<&Selection> { self.selection.as_ref() }
 
+    fn restore_selection(&mut self, mask: Option<SelectionMask>) {
+        self.selection = mask.map(|mask| mask.bounds);
+
+        if let Some(mask) = mask {
+            self.selection_mode = mask.mode;
+        }
+    }
+
     pub fn set_focus(&mut self, focus: Option<AreaFocus>) { self.focus = focus; }
 
     pub fn focus(&self) -> Option<&AreaFocus> { self.focus.as_ref().filter(|focus| focus.seed().z == self.z) }
@@ -615,9 +623,14 @@ impl MapDocument {
 
         let edit = edit?;
         let level = edit.level().map(LevelEdit::z);
+        let selection = edit.selection();
         let affected = Some(with_replaced(edit, replaced));
         if let Some(z) = level {
             self.level_changed(z);
+        }
+
+        if let Some(SelectionChange { before, .. }) = selection {
+            self.restore_selection(before);
         }
 
         self.generation += 1;
@@ -645,9 +658,14 @@ impl MapDocument {
 
         let edit = edit?;
         let level = edit.level().map(LevelEdit::z);
+        let selection = edit.selection();
         let affected = Some(with_replaced(edit, replaced));
         if let Some(z) = level {
             self.level_changed(z);
+        }
+
+        if let Some(SelectionChange { after, .. }) = selection {
+            self.restore_selection(after);
         }
 
         self.generation += 1;

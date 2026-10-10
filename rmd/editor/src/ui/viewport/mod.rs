@@ -19,13 +19,7 @@ use self::{
     hover::draw_git_hover,
     overlays::{banner_contains, draw_recent_prefabs},
     presence::{draw_coop_status, draw_tab_menu, hit_comment, share_presence},
-    selection::{
-        ViewGestures,
-        block_controls_contain,
-        conflict_controls_contain,
-        prepare_block_preview,
-        sync_gestures,
-    },
+    selection::{ViewGestures, conflict_controls_contain, prepare_block_preview, sync_gestures},
     shortcuts::choose_recent_on_key,
     tools::{Clicks, apply_right_click, configure_tool_interaction, draw_node_hit, drive_node_tool, interaction_mode},
 };
@@ -199,7 +193,6 @@ impl ViewFrame<'_> {
 
 #[derive(Debug, Clone, Copy)]
 struct MouseCapture {
-    is_block_controls: bool,
     is_conflict_controls: bool,
     is_banner: bool,
     is_blame_popup: bool,
@@ -208,7 +201,7 @@ struct MouseCapture {
 
 impl MouseCapture {
     const fn is_any(self) -> bool {
-        self.is_block_controls || self.is_conflict_controls || self.is_banner || self.is_blame_popup || self.is_escape
+        self.is_conflict_controls || self.is_banner || self.is_blame_popup || self.is_escape
     }
 }
 
@@ -569,18 +562,9 @@ impl UiState {
         let is_escape = self.cancel_on_escape(ui, session, frame, tool);
         self.draw_place_preview(ui, session, settings, frame, tool);
 
-        let paste_mask = sync_gestures(session, frame.gestures, tool);
-        let paste_target = paste_mask.map(|mask| mask.bounds);
+        sync_gestures(session, frame.gestures, tool);
         let conflict_regions = session.conflict_regions(frame.id, Some(session.z()));
         let capture = MouseCapture {
-            is_block_controls: block_controls_contain(
-                ui,
-                session,
-                frame,
-                tool,
-                paste_target,
-                self.gizmo.block_rotation_open(),
-            ),
             is_conflict_controls: conflict_controls_contain(ui, session, frame, &conflict_regions),
             is_banner: banner_contains(ui, session, frame),
             is_blame_popup: is_blame_capturing,
@@ -591,7 +575,14 @@ impl UiState {
             max: frame.layout.viewport.max,
             hovered: frame.is_hovered && !capture.is_any() && !ui.io().want_text_input(),
         };
-        let is_gizmo_capturing = self.draw_tool_gizmo(ui, session, settings, frame, tool, paste_target, gizmo_view);
+        let is_gizmo_capturing = self.draw_tool_gizmo(ui, session, settings, frame, tool, gizmo_view);
+        if tool == Tool::BlockSelect
+            && gizmo_view.hovered
+            && !frame.gestures.is_busy()
+            && settings.keybindings.get(KeybindAction::Rotate).is_pressed(ui)
+        {
+            session.rotate_selected_block();
+        }
 
         let clicks = Clicks::read(ui);
         if clicks.is_right_clicked
@@ -615,12 +606,12 @@ impl UiState {
         }
 
         self.drag_rectangle(ui, session, frame, clicks.is_left_down);
-        self.draw_block_overlays(ui, session, frame, tool, paste_mask, gizmo_view);
+        self.drag_fill_rect(ui, session, frame, clicks.is_left_down);
+        self.draw_block_overlays(ui, session, frame, tool, gizmo_view);
         self.apply_map_menu(ui, session, settings, frame);
 
-        let actions = self.draw_block_controls(ui, session, frame, tool, paste_target, &conflict_regions);
+        self.draw_conflict_overlay_controls(ui, session, frame, &conflict_regions);
         self.draw_top_overlays(ui, session, settings, frame);
-        self.apply_block_actions(session, frame.gestures, actions);
         draw_recent_prefabs(ui, session, settings, frame);
         configure_tool_interaction(session.tool(), frame.interaction);
         draw_fill_limit_warning(

@@ -226,7 +226,27 @@ pub(super) fn draw_popup(
     if ui.menu_item_enabled_selected_no_shortcut("Delete", false, can_clear) {
         action = Some(Action::Delete(coord));
     }
+
+    if target.block_selected {
+        ui.separator();
+
+        let mode = session.selection_mode();
+        for (label, transform) in [
+            ("Mirror selection horizontally", SelectionTransform::MirrorHorizontal),
+            ("Mirror selection vertically", SelectionTransform::MirrorVertical),
+        ] {
+            if ui.menu_item_enabled_selected_no_shortcut(
+                label,
+                false,
+                session.can_transform_selected_block_with_mode(transform, mode),
+            ) {
+                action = Some(Action::Mirror(transform));
+            }
+        }
+    }
+
     ui.separator();
+
     let (name_width, path_width) = target
         .atoms
         .iter()
@@ -365,22 +385,7 @@ pub(super) fn draw_popup(
         draw.add_text([origin[0] + icon_width, origin[1]], text_color, name);
         draw.add_text([origin[0] + path_column, origin[1]], text_color, path_text);
     }
-    if target.block_selected {
-        ui.separator();
-        let mode = session.selection_mode();
-        for (label, transform) in [
-            ("Mirror selection horizontally", SelectionTransform::MirrorHorizontal),
-            ("Mirror selection vertically", SelectionTransform::MirrorVertical),
-        ] {
-            if ui.menu_item_enabled_selected_no_shortcut(
-                label,
-                false,
-                session.can_transform_selected_block_with_mode(transform, mode),
-            ) {
-                action = Some(Action::Mirror(transform));
-            }
-        }
-    }
+
     action
 }
 

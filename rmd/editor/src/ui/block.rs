@@ -1,15 +1,13 @@
-use dear_imgui_rs::{DragFlags, DrawListMut, Key, Ui};
+use dear_imgui_rs::{DragFlags, DrawListMut, Ui};
 use dmm::{Coord, Size};
 use editor::{
     document::{DocumentId, Selection},
     icons::materialdesignicons::ICON_CIRCLE_SMALL,
-    tool::{BlockSelectionMode, SelectionMask, SelectionPlacement, SelectionRotation, Tool},
+    tool::{BlockSelectionMode, SelectionMask},
 };
 
-use super::{OVERLAY_BG, OverlayRect, PASTE_LABELS, common::dpi, draw_overlay_underlay, overlay_padding};
+use super::{OVERLAY_BG, OverlayRect, common::dpi};
 use crate::{camera::Controller, session::Session};
-
-const BLOCK_PLACEMENT_LABELS: [&str; 4] = ["Move", "Copy", "Fill selection", "Clear selection"];
 
 const BLOCK_SELECTION_GREEN: [f32; 4] = [0.0, 1.0, 0.0, 1.0];
 
@@ -68,7 +66,6 @@ impl BlockSelectionOptions {
 pub(super) struct PendingBlockPlacement {
     pub(super) source: Selection,
     pub(super) target: Selection,
-    pub(super) rotation: SelectionRotation,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -104,36 +101,6 @@ pub(super) fn rectangle_drag_coord(
             .clamp(1, i64::from(size.y)) as u32,
         z,
     ))
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum BlockPlacementAction {
-    Move,
-    Copy,
-    Fill,
-    Cancel,
-}
-
-#[derive(Clone, Copy)]
-pub(super) enum PlacementControls {
-    Block,
-    Paste,
-}
-
-impl PlacementControls {
-    fn labels(self) -> &'static [&'static str] {
-        match self {
-            Self::Block => &BLOCK_PLACEMENT_LABELS,
-            Self::Paste => &PASTE_LABELS,
-        }
-    }
-
-    fn rows(self) -> usize {
-        match self {
-            Self::Block => 3,
-            Self::Paste => 1,
-        }
-    }
 }
 
 pub(super) fn marching_stripe_offset(ui: &Ui) -> f32 {
@@ -379,149 +346,6 @@ fn block_border_point(bounds: OverlayRect, distance: f32) -> [f32; 2] {
     }
 }
 
-pub(super) fn block_controls_placement(
-    tool: Tool, selecting: bool, rotation_open: bool, selection: Option<Selection>,
-    pending: Option<PendingBlockPlacement>,
-) -> Option<PendingBlockPlacement> {
-    (matches!(tool, Tool::BlockSelect | Tool::Fill) && !selecting && !rotation_open)
-        .then(|| {
-            selection.map(|source| {
-                pending.unwrap_or(PendingBlockPlacement {
-                    source,
-                    target: source,
-                    rotation: SelectionRotation::Original,
-                })
-            })
-        })
-        .flatten()
-}
-
-pub(super) fn block_placement_controls_layout(
-    ui: &Ui, camera: &Controller, controls: PlacementControls, target: Selection, tile_size: u32,
-    viewport_min: [f32; 2], controls_bounds: OverlayRect,
-) -> ([f32; 2], OverlayRect) {
-    let labels = controls.labels();
-    let rows = controls.rows();
-    let style = ui.clone_style();
-    let padding = style.frame_padding();
-    let spacing = style.item_spacing()[0];
-    let width = labels
-        .iter()
-        .map(|label| ui.calc_text_size(*label)[0] + padding[0] * 2.0)
-        .sum::<f32>()
-        + spacing * labels.len().saturating_sub(1) as f32;
-    let width = if rows > 1 { width.max(280.0) } else { width };
-    let height = ui.frame_height() * rows as f32 + style.item_spacing()[1] * rows.saturating_sub(1) as f32;
-    let selection = block_selection_bounds(camera, viewport_min, target, tile_size);
-    let center = [
-        (selection.min[0] + selection.max[0]) * 0.5,
-        (selection.min[1] + selection.max[1]) * 0.5,
-    ];
-    let padding = overlay_padding(ui);
-    let min_x = controls_bounds.min[0] + padding;
-    let min_y = controls_bounds.min[1] + padding;
-    let max_x = (controls_bounds.max[0] - width - padding).max(min_x);
-    let max_y = (controls_bounds.max[1] - height - padding).max(min_y);
-    let position = [
-        (center[0] - width * 0.5).clamp(min_x, max_x),
-        (if rows > 1 {
-            if selection.max[1] + 20.0 <= max_y {
-                selection.max[1] + 20.0
-            } else if selection.min[1] - height - 20.0 >= min_y {
-                selection.min[1] - height - 20.0
-            } else {
-                max_y
-            }
-        } else {
-            center[1] + 14.0
-        })
-        .clamp(min_y, max_y),
-    ];
-    let bounds = OverlayRect {
-        min: [position[0] - padding, position[1] - padding],
-        max: [position[0] + width + padding, position[1] + height + padding],
-    };
-
-    (position, bounds)
-}
-
-pub(super) fn draw_block_placement_controls(
-    ui: &Ui, camera: &Controller, placement: PendingBlockPlacement, viewport_min: [f32; 2],
-    controls_bounds: OverlayRect, session: &mut Session, options: &mut BlockSelectionOptions,
-) -> Option<BlockPlacementAction> {
-    let (position, bounds) = block_placement_controls_layout(
-        ui,
-        camera,
-        PlacementControls::Block,
-        placement.target,
-        session.options.tile_size,
-        viewport_min,
-        controls_bounds,
-    );
-    draw_overlay_underlay(ui, bounds);
-    ui.set_cursor_screen_pos(position);
-
-    let mode = session.selection_mode();
-    let mode_label = match mode {
-        BlockSelectionMode::Full => String::from("Full"),
-        BlockSelectionMode::Hollow { line_width } => format!("Border ({line_width})"),
-    };
-    ui.align_text_to_frame_padding();
-    ui.text(format!(
-        "{} x {} {ICON_CIRCLE_SMALL} {mode_label}",
-        placement.target.width(),
-        placement.target.height()
-    ));
-    let row_height = ui.frame_height() + ui.clone_style().item_spacing()[1];
-    ui.set_cursor_screen_pos([position[0], position[1] + row_height]);
-    let pending = placement.target != placement.source || placement.rotation != SelectionRotation::Original;
-    ui.with_disabled_if(pending, || draw_selection_mode_controls(ui, session, options));
-    let mode = session.selection_mode();
-    let can_move = session.can_place_selected_block_with_mode(
-        placement.target.min,
-        placement.rotation,
-        SelectionPlacement::Move,
-        mode,
-    );
-    let can_fill = session.can_fill_selected_block(placement.target.min, placement.rotation, mode);
-
-    let mut action = None;
-    ui.set_cursor_screen_pos([position[0], position[1] + row_height * 2.0]);
-    if session.tool() == Tool::BlockSelect {
-        if ui.button(BLOCK_PLACEMENT_LABELS[0]) {
-            action = Some(BlockPlacementAction::Move);
-        }
-        ui.same_line();
-        if ui.button(BLOCK_PLACEMENT_LABELS[1]) {
-            action = Some(BlockPlacementAction::Copy);
-        }
-        ui.same_line();
-        if ui.with_disabled_if(!can_fill, || ui.button(BLOCK_PLACEMENT_LABELS[2])) {
-            action = Some(BlockPlacementAction::Fill);
-        }
-        ui.set_item_tooltip(session.palette().map_or_else(
-            || String::from("Choose a type to fill the selection"),
-            |prefab| format!("Fill selected tiles with {}", prefab.path),
-        ));
-        ui.same_line();
-    }
-    if ui.button(if pending { "Cancel" } else { "Clear selection" }) {
-        action = Some(BlockPlacementAction::Cancel);
-    }
-
-    if action.is_none()
-        && ui.is_window_focused()
-        && !ui.io().want_text_input()
-        && !ui.is_popup_open_with_flags("", dear_imgui_rs::PopupQueryFlags::ANY_POPUP)
-        && ui.is_key_pressed(Key::Enter)
-        && can_move
-    {
-        action = Some(BlockPlacementAction::Move);
-    }
-
-    action
-}
-
 pub(super) fn draw_selection_mode_controls(ui: &Ui, session: &mut Session, options: &mut BlockSelectionOptions) {
     let current = session.selection_mask();
     let mode = current.map_or(options.mode(), |mask| mask.mode);
@@ -566,16 +390,11 @@ pub(super) fn draw_selection_mode_controls(ui: &Ui, session: &mut Session, optio
 #[cfg(test)]
 mod tests {
     use dmm::Coord;
-    use editor::{
-        document::Selection,
-        tool::{BlockSelectionMode, SelectionRotation, Tool},
-    };
+    use editor::{document::Selection, tool::BlockSelectionMode};
 
     use super::{
         BlockSelectionOptions,
-        PendingBlockPlacement,
         block_border_segments,
-        block_controls_placement,
         block_selection_bounds,
         hollow_selection_inner,
         ring_regions,
@@ -674,29 +493,6 @@ mod tests {
                     || region.min[1] >= inner.max[1]
             );
         }
-    }
-
-    #[test]
-    fn block_controls_are_available_before_a_selection_is_moved() {
-        let selection = Selection::from_drag(Coord::new(1, 1, 1), Coord::new(2, 2, 1));
-        let expected = PendingBlockPlacement {
-            source: selection,
-            target: selection,
-            rotation: SelectionRotation::Original,
-        };
-
-        assert_eq!(
-            block_controls_placement(Tool::BlockSelect, false, false, Some(selection), None),
-            Some(expected)
-        );
-        assert_eq!(
-            block_controls_placement(Tool::BlockSelect, true, false, Some(selection), None),
-            None
-        );
-        assert_eq!(
-            block_controls_placement(Tool::BlockSelect, false, true, Some(selection), None),
-            None
-        );
     }
 
     #[test]

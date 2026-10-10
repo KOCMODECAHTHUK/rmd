@@ -321,6 +321,7 @@ pub(crate) enum KeybindAction {
     DeleteTool,
     ReplaceTool,
     FillTool,
+    RectFillTool,
     CommentTool,
     Rotate,
     ToolAlternate,
@@ -357,7 +358,7 @@ pub(crate) enum KeybindAction {
 }
 
 impl KeybindAction {
-    pub const ALL: [Self; 56] = [
+    pub const ALL: [Self; 57] = [
         Self::Save,
         Self::SaveAll,
         Self::CloseMap,
@@ -381,6 +382,7 @@ impl KeybindAction {
         Self::DeleteTool,
         Self::ReplaceTool,
         Self::FillTool,
+        Self::RectFillTool,
         Self::CommentTool,
         Self::Rotate,
         Self::ToolAlternate,
@@ -453,6 +455,7 @@ impl KeybindAction {
             Self::DeleteTool => "Delete tool",
             Self::ReplaceTool => "Replace tool",
             Self::FillTool => "Fill tool",
+            Self::RectFillTool => "Rectangle fill tool",
             Self::CommentTool => "Comment tool",
             Self::Rotate => "Rotate",
             Self::ToolAlternate => "Alternate tool action (hold)",
@@ -516,6 +519,7 @@ impl KeybindAction {
             Self::DeleteTool => "delete-tool",
             Self::ReplaceTool => "replace-tool",
             Self::FillTool => "fill-tool",
+            Self::RectFillTool => "rect-fill-tool",
             Self::CommentTool => "comment-tool",
             Self::Rotate => "rotate",
             Self::ToolAlternate => "tool-alternate",
@@ -579,6 +583,7 @@ pub(crate) struct KeyBindings {
     delete_tool: KeyBinding,
     replace_tool: KeyBinding,
     fill_tool: KeyBinding,
+    rect_fill_tool: KeyBinding,
     comment_tool: KeyBinding,
     rotate: KeyBinding,
     tool_alternate: KeyBinding,
@@ -640,6 +645,7 @@ impl Default for KeyBindings {
             delete_tool: KeyBinding::new(Key::X),
             replace_tool: KeyBinding::new(Key::E),
             fill_tool: KeyBinding::new(Key::Q),
+            rect_fill_tool: KeyBinding::with_shift(Key::Q),
             comment_tool: KeyBinding::new(Key::T),
             rotate: KeyBinding::new(Key::R),
             tool_alternate: KeyBinding::new(Key::ModAlt),
@@ -702,7 +708,8 @@ impl KeyBindings {
             block_select_tool: KeyBinding::new(Key::Key3),
             delete_tool: KeyBinding::new(Key::D),
             replace_tool: KeyBinding::new(Key::Key4),
-            fill_tool: KeyBinding::new(Key::Key2),
+            fill_tool: KeyBinding::with_shift(Key::Key2),
+            rect_fill_tool: KeyBinding::new(Key::Key2),
             comment_tool: KeyBinding::with_shift(Key::T),
             rotate: KeyBinding::with_shift(Key::R),
             tool_alternate: KeyBinding::new(Key::ModAlt),
@@ -764,6 +771,7 @@ impl KeyBindings {
             KeybindAction::DeleteTool => self.delete_tool,
             KeybindAction::ReplaceTool => self.replace_tool,
             KeybindAction::FillTool => self.fill_tool,
+            KeybindAction::RectFillTool => self.rect_fill_tool,
             KeybindAction::CommentTool => self.comment_tool,
             KeybindAction::Rotate => self.rotate,
             KeybindAction::ToolAlternate => self.tool_alternate,
@@ -880,6 +888,7 @@ impl KeyBindings {
             KeybindAction::DeleteTool => self.delete_tool = binding,
             KeybindAction::ReplaceTool => self.replace_tool = binding,
             KeybindAction::FillTool => self.fill_tool = binding,
+            KeybindAction::RectFillTool => self.rect_fill_tool = binding,
             KeybindAction::CommentTool => self.comment_tool = binding,
             KeybindAction::Rotate => self.rotate = binding,
             KeybindAction::ToolAlternate => self.tool_alternate = binding,
@@ -1490,6 +1499,10 @@ mod tests {
             bindings.get(KeybindAction::BlockSelectTool),
             KeyBinding::with_shift(Key::S)
         );
+        assert_eq!(
+            bindings.get(KeybindAction::RectFillTool),
+            KeyBinding::with_shift(Key::Q)
+        );
         assert_eq!(bindings.get(KeybindAction::Undo), KeyBinding::with_ctrl(Key::Z));
         assert_eq!(bindings.get(KeybindAction::Redo), KeyBinding::with_ctrl(Key::Y));
         assert_eq!(bindings.get(KeybindAction::Save), KeyBinding::with_ctrl(Key::S));
@@ -1536,7 +1549,8 @@ mod tests {
             (KeybindAction::BlockSelectTool, KeyBinding::new(Key::Key3)),
             (KeybindAction::DeleteTool, KeyBinding::new(Key::D)),
             (KeybindAction::ReplaceTool, KeyBinding::new(Key::Key4)),
-            (KeybindAction::FillTool, KeyBinding::new(Key::Key2)),
+            (KeybindAction::FillTool, KeyBinding::with_shift(Key::Key2)),
+            (KeybindAction::RectFillTool, KeyBinding::new(Key::Key2)),
             (KeybindAction::Rotate, KeyBinding::with_shift(Key::R)),
             (KeybindAction::Copy, KeyBinding::with_ctrl(Key::C)),
             (KeybindAction::Cut, KeyBinding::with_ctrl(Key::X)),

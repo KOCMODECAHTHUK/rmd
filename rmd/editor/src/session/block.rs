@@ -101,16 +101,13 @@ impl Session {
             return false;
         };
 
-        if !self.commit(action, None) {
-            return false;
-        }
-
-        if let Some(document) = self.state.active_document_mut() {
-            document.set_selection(Some(selection), selection_mode);
-            document.select_instance(None);
-        }
-
-        true
+        self.commit_selecting(
+            action,
+            SelectionMask {
+                bounds: selection,
+                mode: selection_mode,
+            },
+        )
     }
 
     pub fn can_place_selected_block_with_mode(
@@ -154,10 +151,8 @@ impl Session {
                 .all(|coord| document.allows_edit_at(coord))
     }
 
-    pub fn fill_selected_block(
-        &mut self, target_min: Coord, rotation: SelectionRotation, selection_mode: BlockSelectionMode,
-    ) -> bool {
-        if !self.can_fill_selected_block(target_min, rotation, selection_mode) {
+    pub fn fill_rect(&mut self, mask: SelectionMask) -> bool {
+        if !self.can_fill_rect(mask) {
             return false;
         }
 
@@ -168,18 +163,11 @@ impl Session {
             let Some((environment, document)) = self.state.active_pair_mut() else {
                 return false;
             };
-            let Some(selection) = document.selection().copied() else {
-                return false;
-            };
-            let Some(target) = rotated_selection_at(selection, target_min, rotation) else {
-                return false;
-            };
 
-            build_selection_fill(document, &environment.tree, target, &prefab, selection_mode)
-                .map(|action| (action, target))
+            build_selection_fill(document, &environment.tree, mask.bounds, &prefab, mask.mode)
         };
 
-        let Some((action, target)) = built else {
+        let Some(action) = built else {
             return false;
         };
 
@@ -187,22 +175,12 @@ impl Session {
             return false;
         }
 
-        if let Some(document) = self.state.active_document_mut() {
-            document.set_selection(Some(target), selection_mode);
-            document.select_instance(None);
-        }
         self.state.choose_prefab(prefab);
 
         true
     }
 
-    pub fn can_fill_selected_block(
-        &self, target_min: Coord, rotation: SelectionRotation, mode: BlockSelectionMode,
-    ) -> bool {
-        if self.tool() != Tool::BlockSelect {
-            return false;
-        }
-
+    pub fn can_fill_rect(&self, mask: SelectionMask) -> bool {
         let Some(environment) = self.state.environment.as_ref() else {
             return false;
         };
@@ -213,24 +191,11 @@ impl Session {
             return false;
         };
 
-        if !is_placeable(&environment.tree, prefab_id) {
-            return false;
-        }
+        is_placeable(&environment.tree, prefab_id) && self.can_select_block(mask)
+    }
 
-        let Some(document) = self.state.active_document() else {
-            return false;
-        };
-        let Some(selection) = self.selection() else {
-            return false;
-        };
-        let Some(target) = rotated_selection_at(selection, target_min, rotation) else {
-            return false;
-        };
-
-        target.is_well_formed()
-            && target.max.x <= document.map.size().x
-            && target.max.y <= document.map.size().y
-            && mode.tiles(target).all(|coord| document.allows_edit_at(coord))
+    pub fn rotate_selected_block(&mut self) -> bool {
+        self.transform_selected_block_with_mode(SelectionTransform::RotateClockwise, self.selection_mode())
     }
 
     pub fn transform_selected_block_with_mode(
@@ -263,16 +228,13 @@ impl Session {
             return false;
         };
 
-        if !self.commit(action, None) {
-            return false;
-        }
-
-        if let Some(document) = self.state.active_document_mut() {
-            document.set_selection(Some(selection), selection_mode);
-            document.select_instance(None);
-        }
-
-        true
+        self.commit_selecting(
+            action,
+            SelectionMask {
+                bounds: selection,
+                mode: selection_mode,
+            },
+        )
     }
 
     pub fn can_transform_selected_block_with_mode(
@@ -448,11 +410,7 @@ mod tests {
             let mut red = Prefab::new(TreePath::parse("/turf/open/floor"));
             red.set_var("color".into(), Value::Text("#ff0000".into()));
             session.state.choose_prefab(red.clone());
-            assert!(session.fill_selected_block(
-                mask.bounds.min,
-                SelectionRotation::Original,
-                session.selection_mode()
-            ));
+            assert!(session.fill_rect(mask));
             let mut blue = red.clone();
             blue.set_var("color".into(), Value::Text("#0000ff".into()));
             session.set_tool(Tool::Fill);
@@ -514,7 +472,7 @@ mod tests {
     }
 
     #[test]
-    fn block_fill_commits_the_palette_across_the_target_and_updates_render_caches() {
+    fn rect_fill_commits_the_palette_across_the_rect_and_keeps_the_selection() {
         let mut session = focus_session();
         let source = Coord::new(1, 1, 1);
         let destination = Coord::new(2, 1, 1);
@@ -531,14 +489,15 @@ mod tests {
         assert!(session.select_block(Some(Selection::from_drag(source, source))));
         let revision = session.revision();
 
-        assert!(session.can_fill_selected_block(source, SelectionRotation::Original, BlockSelectionMode::Full,));
-        assert!(session.can_fill_selected_block(destination, SelectionRotation::Original, BlockSelectionMode::Full,));
-        assert!(session.fill_selected_block(destination, SelectionRotation::Original, BlockSelectionMode::Full,));
+        let mask = |coord| SelectionMask {
+            bounds: Selection::from_drag(coord, coord),
+            mode: BlockSelectionMode::Full,
+        };
+        assert!(session.can_fill_rect(mask(source)));
+        assert!(session.can_fill_rect(mask(destination)));
+        assert!(session.fill_rect(mask(destination)));
 
-        assert_eq!(
-            session.selection(),
-            Some(Selection::from_drag(destination, destination))
-        );
+        assert_eq!(session.selection(), Some(Selection::from_drag(source, source)));
         assert_eq!(session.palette(), Some(&prefab));
         assert!(
             session
@@ -556,7 +515,7 @@ mod tests {
     }
 
     #[test]
-    fn hollow_block_fill_passes_the_border_mode_through_the_session() {
+    fn hollow_rect_fill_passes_the_border_mode_through_the_session() {
         let mut session = flat_session(5, 5);
 
         let table = session
@@ -566,16 +525,12 @@ mod tests {
             .unwrap();
         assert!(session.choose_type(table));
         let prefab = session.palette().unwrap().clone();
-        let selection = Selection::from_drag(Coord::new(1, 1, 1), Coord::new(5, 5, 1));
-        session.set_tool(Tool::BlockSelect);
-        assert!(session.select_block(Some(selection)));
         let revision = session.revision();
 
-        assert!(session.fill_selected_block(
-            selection.min,
-            SelectionRotation::Original,
-            BlockSelectionMode::Hollow { line_width: 1 },
-        ));
+        assert!(session.fill_rect(SelectionMask {
+            bounds: Selection::from_drag(Coord::new(1, 1, 1), Coord::new(5, 5, 1)),
+            mode: BlockSelectionMode::Hollow { line_width: 1 },
+        }));
 
         let has_prefab = |coord| {
             session
@@ -642,6 +597,50 @@ mod tests {
         assert_eq!(session.revision(), revision.wrapping_add(1));
         assert_eq!(session.frame_update().unwrap().previous_revision, revision);
         assert_render_cache_matches_rebuild(&session);
+    }
+
+    #[test]
+    fn undo_and_redo_move_the_selection_with_block_edits() {
+        let mut session = flat_session(8, 4);
+        session.set_tool(Tool::BlockSelect);
+        let source = Selection::from_drag(Coord::new(1, 1, 1), Coord::new(2, 1, 1));
+        let border = BlockSelectionMode::Hollow { line_width: 1 };
+        assert!(session.select_block_with_mode(Some(source), border));
+        let moved = Selection::from_drag(Coord::new(4, 2, 1), Coord::new(5, 2, 1));
+        assert!(session.place_selected_block_with_mode(
+            moved.min,
+            SelectionRotation::Original,
+            SelectionPlacement::Move,
+            border,
+        ));
+        assert!(session.rotate_selected_block());
+        let rotated = session.selection().unwrap();
+        assert_ne!(rotated, moved);
+
+        assert!(session.undo());
+        assert_eq!(session.selection(), Some(moved));
+        assert!(session.undo());
+        assert_eq!(
+            session.selection_mask(),
+            Some(SelectionMask {
+                bounds: source,
+                mode: border,
+            }),
+        );
+        assert!(session.redo());
+        assert_eq!(session.selection(), Some(moved));
+        assert!(session.redo());
+        assert_eq!(session.selection(), Some(rotated));
+
+        assert!(session.copy_selection(BlockSelectionMode::Full));
+        session.select_block(None);
+        let pasted = Selection::from_drag(Coord::new(7, 3, 1), Coord::new(7, 4, 1));
+        assert!(session.paste_clipboard(pasted.min, SelectionRotation::Original));
+        assert_eq!(session.selection(), Some(pasted));
+        assert!(session.undo());
+        assert_eq!(session.selection(), None);
+        assert!(session.redo());
+        assert_eq!(session.selection(), Some(pasted));
     }
 
     #[test]

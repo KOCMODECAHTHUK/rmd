@@ -1,7 +1,30 @@
 use super::*;
 
+fn red_floor() -> Prefab {
+    let mut red = Prefab::new(TreePath::parse("/turf/open/floor"));
+    red.set_var("color".into(), core::types::Value::Text("#ff0000".into()));
+
+    red
+}
+
+fn center_of(app: &RectangleUiHarness, selection: Selection) -> [f32; 2] {
+    let (min, max) = (
+        app.tile(selection.min.x, selection.min.y),
+        app.tile(selection.max.x, selection.max.y),
+    );
+
+    [(min[0] + max[0]) * 0.5, (min[1] + max[1]) * 0.5]
+}
+
+fn ctrl_key(app: &mut RectangleUiHarness, key: Key) {
+    app.key(Key::ModCtrl, true);
+    app.key(key, true);
+    app.key(key, false);
+    app.key(Key::ModCtrl, false);
+}
+
 #[test]
-fn rectangle_ui_supports_drawing_resizing_filling_and_switching_to_the_bucket() {
+fn rectangle_ui_draws_borders_resizes_from_the_edges_and_shares_the_mask_with_the_bucket() {
     let _guard = IMGUI_CONTEXT.lock().unwrap();
     let mut app = RectangleUiHarness::new();
     app.pointer(app.tile(5, 8), false);
@@ -11,10 +34,8 @@ fn rectangle_ui_supports_drawing_resizing_filling_and_switching_to_the_bucket() 
     assert!(app.session.selection().is_none());
     app.key(Key::S, false);
 
-    // Shift is still held from the shortcut, so the drag draws a border.
-    app.pointer(app.tile(5, 8), true);
-    app.pointer(app.tile(7, 10), true);
-    app.pointer(app.tile(7, 10), false);
+    // shift is still held from the shortcut, so the drag draws a border
+    app.drag(app.tile(5, 8), app.tile(7, 10));
     app.key(Key::ModShift, false);
     let border = SelectionMask {
         bounds: Selection::from_drag(Coord::new(5, 8, 1), Coord::new(7, 10, 1)),
@@ -23,19 +44,9 @@ fn rectangle_ui_supports_drawing_resizing_filling_and_switching_to_the_bucket() 
     assert_eq!(app.session.selection_mask(), Some(border));
     assert_eq!(app.session.undo_label(), None);
 
-    // Explicit mode controls change the current selection without painting.
-    app.click(app.mode_buttons.unwrap().1);
-    assert_eq!(app.session.selection_mode(), BlockSelectionMode::Full);
-    app.click(app.mode_buttons.unwrap().0);
-    assert_eq!(app.session.selection_mask(), Some(border));
-
-    // A Shift-gizmo drag resizes bounds; releasing Shift mid-drag keeps the border.
-    app.pointer(app.tile(6, 9), false);
-    app.key(Key::ModShift, true);
-    app.pointer(app.tile(6, 9), true);
-    app.pointer(app.tile(8, 11), true);
-    app.key(Key::ModShift, false);
-    app.pointer(app.tile(8, 11), false);
+    let corner = app.tile(7, 10);
+    let corner = [corner[0] + 23.0, corner[1] - 23.0];
+    app.drag(corner, [corner[0] + 64.0, corner[1] - 64.0]);
     let resized = SelectionMask {
         bounds: Selection::from_drag(border.bounds.min, Coord::new(9, 12, 1)),
         ..border
@@ -44,36 +55,13 @@ fn rectangle_ui_supports_drawing_resizing_filling_and_switching_to_the_bucket() 
     assert!(app.view.gestures.block_placement.is_none());
     assert_eq!(app.session.undo_label(), None);
 
-    let mut red = Prefab::new(TreePath::parse("/turf/open/floor"));
-    red.set_var("color".into(), core::types::Value::Text("#ff0000".into()));
-    app.session.state.choose_prefab(red.clone());
-    app.step();
-    app.click(app.fill_button.unwrap());
-    assert!(
-        app.session
-            .map()
-            .unwrap()
-            .tile_at(resized.bounds.min)
-            .unwrap()
-            .contains(&red)
-    );
-    assert!(
-        !app.session
-            .map()
-            .unwrap()
-            .tile_at(Coord::new(7, 10, 1))
-            .unwrap()
-            .contains(&red)
-    );
-
     app.pointer(app.tile(5, 8), false);
     app.key(Key::Q, true);
     app.key(Key::Q, false);
     assert_eq!(app.session.tool(), Tool::Fill);
     assert_eq!(app.session.selection_mask(), Some(resized));
-    let mut blue = red.clone();
-    blue.set_var("color".into(), core::types::Value::Text("#0000ff".into()));
-    app.session.state.choose_prefab(blue.clone());
+    let red = red_floor();
+    app.session.state.choose_prefab(red.clone());
     app.click(app.tile(7, 10));
     assert!(
         !app.session
@@ -81,7 +69,7 @@ fn rectangle_ui_supports_drawing_resizing_filling_and_switching_to_the_bucket() 
             .unwrap()
             .tile_at(resized.bounds.min)
             .unwrap()
-            .contains(&blue)
+            .contains(&red)
     );
     app.click(app.tile(5, 8));
     assert!(
@@ -90,7 +78,7 @@ fn rectangle_ui_supports_drawing_resizing_filling_and_switching_to_the_bucket() 
             .unwrap()
             .tile_at(resized.bounds.min)
             .unwrap()
-            .contains(&blue)
+            .contains(&red)
     );
     assert!(
         !app.session
@@ -98,23 +86,11 @@ fn rectangle_ui_supports_drawing_resizing_filling_and_switching_to_the_bucket() 
             .unwrap()
             .tile_at(Coord::new(4, 8, 1))
             .unwrap()
-            .contains(&blue)
+            .contains(&red)
     );
     app.key(Key::Escape, true);
     app.key(Key::Escape, false);
     assert_eq!(app.session.selection_mask(), None);
-    app.key(Key::ModCtrl, true);
-    app.key(Key::Z, true);
-    app.key(Key::Z, false);
-    app.key(Key::ModCtrl, false);
-    assert!(
-        app.session
-            .map()
-            .unwrap()
-            .tile_at(resized.bounds.min)
-            .unwrap()
-            .contains(&red)
-    );
 }
 
 #[test]
@@ -145,7 +121,7 @@ fn rectangle_ui_keeps_shift_draw_mode_and_restores_cancelled_gestures() {
     app.pointer(app.tile(14, 14), false);
     assert_eq!(app.session.selection_mask(), Some(original));
 
-    // A corner handle resizes without Shift, and tool changes cancel the active resize.
+    // a corner handle resizes, and tool changes cancel the active resize
     let corner = app.tile(7, 10);
     let corner = [corner[0] + 23.0, corner[1] - 23.0];
     app.pointer(corner, false);
@@ -160,36 +136,140 @@ fn rectangle_ui_keeps_shift_draw_mode_and_restores_cancelled_gestures() {
     app.pointer(corner, false);
     assert_eq!(app.session.undo_label(), None);
     assert!(app.view.gestures.rectangle_gesture.is_none());
-    app.click(app.mode_buttons.unwrap().0);
-    assert_eq!(
-        app.state.block_selection_options.mode(),
-        BlockSelectionMode::Hollow { line_width: 1 }
-    );
 }
 
 #[test]
-fn rectangle_ui_copies_a_border_to_another_map_and_keeps_it_hollow_after_paste() {
+fn rectangle_ui_clears_on_a_click_outside_and_selects_one_tile_without_a_selection() {
+    let _guard = IMGUI_CONTEXT.lock().unwrap();
+    let mut app = RectangleUiHarness::new();
+    app.session.set_tool(Tool::BlockSelect);
+    app.click(app.tile(4, 4));
+    let one = Selection::from_drag(Coord::new(4, 4, 1), Coord::new(4, 4, 1));
+    assert_eq!(app.session.selection(), Some(one));
+    assert_eq!(app.session.undo_label(), None);
+
+    app.drag(app.tile(10, 10), app.tile(12, 11));
+    assert_eq!(
+        app.session.selection(),
+        Some(Selection::from_drag(Coord::new(10, 10, 1), Coord::new(12, 11, 1)))
+    );
+    app.click(app.tile(3, 8));
+    assert_eq!(app.session.selection(), None);
+    assert_eq!(app.session.undo_label(), None);
+}
+
+#[test]
+fn rectangle_ui_moves_on_release_copies_with_ctrl_and_cancels_with_escape() {
+    let _guard = IMGUI_CONTEXT.lock().unwrap();
+    let mut app = RectangleUiHarness::new();
+    app.session
+        .state
+        .choose_prefab(Prefab::new(TreePath::parse("/obj/structure/table")));
+    app.session.set_tool(Tool::Place);
+    let table = app.session.place_at(Coord::new(5, 8, 1), None).unwrap();
+    let tables = |app: &RectangleUiHarness| {
+        Selection::from_drag(Coord::new(1, 1, 1), Coord::new(20, 20, 1))
+            .iter()
+            .filter(|coord| {
+                app.session
+                    .map()
+                    .unwrap()
+                    .tile_at(*coord)
+                    .unwrap()
+                    .iter()
+                    .any(|prefab| prefab.path == TreePath::parse("/obj/structure/table"))
+            })
+            .collect::<Vec<_>>()
+    };
+    app.session.set_tool(Tool::BlockSelect);
+    app.step();
+    app.drag(app.tile(5, 8), app.tile(6, 9));
+    let source = Selection::from_drag(Coord::new(5, 8, 1), Coord::new(6, 9, 1));
+    let center = center_of(&app, source);
+    let before = app.session.map().unwrap().clone();
+
+    // escape mid-move drops the drag without an edit
+    app.pointer(center, false);
+    app.pointer(center, true);
+    app.pointer([center[0] + 64.0, center[1]], true);
+    assert!(app.view.gestures.block_placement.is_some());
+    app.key(Key::Escape, true);
+    app.key(Key::Escape, false);
+    app.pointer([center[0] + 64.0, center[1]], false);
+    assert_eq!(app.session.selection(), Some(source));
+    assert_eq!(*app.session.map().unwrap(), before);
+
+    app.key(Key::ModCtrl, true);
+    app.pointer(center, true);
+    app.key(Key::ModCtrl, false);
+    app.pointer([center[0], center[1] - 64.0], true);
+    app.pointer([center[0], center[1] - 64.0], false);
+    let copied = Selection::from_drag(Coord::new(5, 10, 1), Coord::new(6, 11, 1));
+    assert_eq!(app.session.selection(), Some(copied));
+    assert_eq!(tables(&app), [Coord::new(5, 8, 1), Coord::new(5, 10, 1)]);
+
+    let center = center_of(&app, copied);
+    app.drag(center, [center[0] + 64.0, center[1]]);
+    assert_eq!(
+        app.session.selection(),
+        Some(Selection::from_drag(Coord::new(7, 10, 1), Coord::new(8, 11, 1)))
+    );
+    assert_eq!(tables(&app), [Coord::new(5, 8, 1), Coord::new(7, 10, 1)]);
+    let location = app.session.state.active_document().unwrap().instance_location(table);
+    assert_eq!(location.map(|location| location.coord), Some(Coord::new(5, 8, 1)));
+}
+
+#[test]
+fn rotate_shortcut_rotates_the_selection_in_place_with_both_presets_and_a_custom_binding() {
+    let _guard = IMGUI_CONTEXT.lock().unwrap();
+    for (preset, modifier, key, custom) in [
+        (KeybindPreset::Default, None, Key::R, false),
+        (KeybindPreset::StrongDmm, Some(Key::ModShift), Key::R, false),
+        (KeybindPreset::Default, Some(Key::ModCtrl), Key::T, true),
+    ] {
+        let mut app = RectangleUiHarness::new();
+        app.settings.keybindings = preset.bindings();
+        if custom {
+            app.settings
+                .keybindings
+                .rebind(KeybindAction::Rotate, KeyBinding::with_ctrl(Key::T));
+        }
+        app.session.set_tool(Tool::BlockSelect);
+        app.drag(app.tile(2, 8), app.tile(4, 11));
+        app.pointer(app.tile(10, 10), false);
+        if let Some(modifier) = modifier {
+            app.key(modifier, true);
+        }
+        app.key(key, true);
+        app.key(key, false);
+        if let Some(modifier) = modifier {
+            app.key(modifier, false);
+        }
+        assert_eq!(
+            app.session.selection(),
+            Some(Selection::from_drag(Coord::new(2, 8, 1), Coord::new(5, 10, 1))),
+            "{preset:?}"
+        );
+        assert!(app.session.undo_label().is_some());
+    }
+}
+
+#[test]
+fn rectangle_ui_pastes_a_border_into_another_map_immediately() {
     let _guard = IMGUI_CONTEXT.lock().unwrap();
     let mut app = RectangleUiHarness::new();
     let source_id = app.id;
     app.session.set_tool(Tool::BlockSelect);
     app.key(Key::ModShift, true);
-    app.pointer(app.tile(5, 8), true);
-    app.pointer(app.tile(9, 14), true);
-    app.pointer(app.tile(9, 14), false);
+    app.drag(app.tile(5, 8), app.tile(9, 14));
     app.key(Key::ModShift, false);
     let source = app.session.selection_mask().unwrap();
     assert_eq!(source.mode, BlockSelectionMode::Hollow { line_width: 1 });
-    let mut red = Prefab::new(TreePath::parse("/turf/open/floor"));
-    red.set_var("color".into(), core::types::Value::Text("#ff0000".into()));
+    let red = red_floor();
     app.session.state.choose_prefab(red.clone());
-    app.step();
-    app.click(app.fill_button.unwrap());
+    assert!(app.session.fill_rect(source));
     app.pointer(app.tile(5, 8), false);
-    app.key(Key::ModCtrl, true);
-    app.key(Key::C, true);
-    app.key(Key::C, false);
-    app.key(Key::ModCtrl, false);
+    ctrl_key(&mut app, Key::C);
     let clipboard = app.session.clipboard().unwrap().clone();
     assert_eq!(clipboard.filled().count(), source.mode.tiles(source.bounds).count());
     let source_grid = app.session.map().unwrap().clone();
@@ -217,7 +297,7 @@ fn rectangle_ui_copies_a_border_to_another_map_and_keeps_it_hollow_after_paste()
     destination_view.camera.camera.y = 320.0;
     let source_view = std::mem::replace(&mut app.view, destination_view);
     app.state.map_views.insert(source_id, source_view);
-    // Different destination settings and palette must not change what was copied.
+    // destination settings and palette must not change what was copied
     app.state.block_selection_options.full_rectangle = false;
     app.state.block_selection_options.line_width = 3;
     app.session.state.choose_prefab(blue.clone());
@@ -225,30 +305,12 @@ fn rectangle_ui_copies_a_border_to_another_map_and_keeps_it_hollow_after_paste()
         app.step();
     }
     app.pointer(app.tile(12, 10), false);
-    app.key(Key::ModCtrl, true);
-    app.key(Key::V, true);
-    app.key(Key::V, false);
-    app.key(Key::ModCtrl, false);
-    let pending = app
-        .view
-        .gestures
-        .paste
-        .expect("Ctrl+V starts a preview in the destination");
-    let target = app
-        .session
-        .clipboard_selection_mask(pending.min, pending.rotation)
-        .unwrap();
-    assert_eq!(target.mode, source.mode);
-    assert_eq!(
-        app.session
-            .clipboard_preview_sprites(target.bounds, pending.rotation)
-            .len(),
-        clipboard.filled().count()
-    );
-    assert_eq!(*app.session.map().unwrap(), destination_grid, "preview does not paint");
-    app.key(Key::Enter, true);
-    app.key(Key::Enter, false);
-    assert!(app.view.gestures.paste.is_none());
+    ctrl_key(&mut app, Key::V);
+    let target = SelectionMask {
+        bounds: Selection::from_drag(Coord::new(10, 7, 1), Coord::new(14, 13, 1)),
+        mode: source.mode,
+    };
+    assert_eq!(app.session.tool(), Tool::BlockSelect);
     assert_eq!(app.session.selection_mask(), Some(target));
     for coord in target.bounds.iter() {
         let tile = app.session.map().unwrap().tile_at(coord).unwrap();
@@ -256,35 +318,63 @@ fn rectangle_ui_copies_a_border_to_another_map_and_keeps_it_hollow_after_paste()
         assert_eq!(tile.contains(&blue), !target.includes(coord));
     }
     assert_eq!(app.session.state.document(source_id).unwrap().map, source_grid);
-    app.key(Key::ModCtrl, true);
-    app.key(Key::Z, true);
-    app.key(Key::Z, false);
-    app.key(Key::ModCtrl, false);
+    ctrl_key(&mut app, Key::Z);
     assert_eq!(*app.session.map().unwrap(), destination_grid);
     assert_eq!(app.session.state.document(source_id).unwrap().map, source_grid);
-    app.key(Key::ModCtrl, true);
-    app.key(Key::Y, true);
-    app.key(Key::Y, false);
-    app.key(Key::ModCtrl, false);
+    ctrl_key(&mut app, Key::Y);
     assert_eq!(app.session.selection_mask(), Some(target));
+}
 
-    // The next Fill selection must still act on the copied border only.
-    let mut green = blue.clone();
-    green.set_var("color".into(), core::types::Value::Text("#00ff00".into()));
-    app.session.state.choose_prefab(green.clone());
-    app.step();
-    app.click(app.fill_button.unwrap());
-    for coord in target.bounds.iter() {
-        assert_eq!(
-            app.session.map().unwrap().tile_at(coord).unwrap().contains(&green),
-            target.includes(coord)
-        );
-    }
+#[test]
+fn rect_fill_tool_fills_on_release_and_leaves_the_selection_alone() {
+    let _guard = IMGUI_CONTEXT.lock().unwrap();
+    let mut app = RectangleUiHarness::new();
+    app.session.set_tool(Tool::BlockSelect);
+    app.drag(app.tile(15, 15), app.tile(16, 16));
+    let selection = app.session.selection_mask();
+    assert!(selection.is_some());
+    let red = red_floor();
+    app.session.state.choose_prefab(red.clone());
+    app.pointer(app.tile(8, 8), false);
+    app.key(Key::ModShift, true);
+    app.key(Key::Q, true);
+    app.key(Key::Q, false);
+    app.key(Key::ModShift, false);
+    assert_eq!(app.session.tool(), Tool::RectFill);
+    let is_red = |app: &RectangleUiHarness, x, y| {
+        app.session
+            .map()
+            .unwrap()
+            .tile_at(Coord::new(x, y, 1))
+            .unwrap()
+            .contains(&red)
+    };
+
+    app.pointer(app.tile(6, 8), true);
+    app.pointer(app.tile(8, 10), true);
+    assert!(!is_red(&app, 6, 8), "nothing is painted until release");
+    app.pointer(app.tile(8, 10), false);
+    assert!(is_red(&app, 6, 8) && is_red(&app, 7, 9) && is_red(&app, 8, 10));
+    assert!(!is_red(&app, 9, 11));
+
+    app.key(Key::ModShift, true);
+    app.drag(app.tile(11, 8), app.tile(13, 10));
+    app.key(Key::ModShift, false);
+    assert!(is_red(&app, 11, 9) && !is_red(&app, 12, 9));
+
+    let before = app.session.map().unwrap().clone();
+    app.pointer(app.tile(6, 12), true);
+    app.pointer(app.tile(7, 13), true);
+    app.key(Key::Escape, true);
+    app.key(Key::Escape, false);
+    app.pointer(app.tile(7, 13), false);
+    assert_eq!(*app.session.map().unwrap(), before);
+    assert_eq!(app.session.selection_mask(), selection);
 }
 
 fn gizmo_frame(
-    context: &mut dear_imgui_rs::Context, gizmo: &mut GizmoState, camera: &Controller, settings: &Settings,
-    target: BlockGizmoTarget, hovered: bool,
+    context: &mut dear_imgui_rs::Context, gizmo: &mut GizmoState, camera: &Controller, target: BlockGizmoTarget,
+    hovered: bool,
 ) -> crate::gizmo::BlockGizmoResponse {
     let ui = context.frame();
     let view = GizmoMapView {
@@ -297,7 +387,7 @@ fn gizmo_frame(
         .position([0.0; 2], Condition::Always)
         .size([800.0, 600.0], Condition::Always)
         .build(|| {
-            let response = gizmo.draw_block(ui, settings, camera, target, view);
+            let response = gizmo.draw_block(ui, camera, target, view);
             gizmo.draw_block_overlay(
                 ui,
                 camera,
@@ -315,94 +405,58 @@ fn gizmo_frame(
 }
 
 #[test]
-fn resize_and_move_gestures_keep_their_mouse_down_action_when_shift_changes() {
+fn block_drags_keep_their_mouse_down_action_when_modifiers_change() {
     let _guard = IMGUI_CONTEXT.lock().unwrap();
-    for resize in [true, false] {
+    for (resize, copy) in [(true, false), (false, false), (false, true)] {
         let mut context = rectangle_context();
         let mut camera = Controller::new();
         camera.resize(800, 600);
         camera.center_on_tile(Coord::new(5, 5, 1), 32);
         let selection = Selection::from_drag(Coord::new(3, 3, 1), Coord::new(5, 5, 1));
         let bounds = block_selection_bounds(&camera, [0.0; 2], selection, 32);
-        let origin = [
-            (bounds.min[0] + bounds.max[0]) * 0.5,
-            (bounds.min[1] + bounds.max[1]) * 0.5,
-        ];
+        let start = if resize {
+            [bounds.max[0] + 7.0, bounds.min[1] - 7.0]
+        } else {
+            [
+                (bounds.min[0] + bounds.max[0]) * 0.5,
+                (bounds.min[1] + bounds.max[1]) * 0.5,
+            ]
+        };
         let mut target = BlockGizmoTarget {
             selection,
-            rotation: SelectionRotation::Original,
             map_size: Size { x: 10, y: 10, z: 1 },
             tile_size: 32,
-            kind: BlockGizmoKind::Selection,
         };
         let mut gizmo = GizmoState::default();
-        let settings = Settings::default();
-        context.io_mut().add_mouse_pos_event(origin);
-        context.io_mut().add_key_event(Key::ModShift, resize);
+        let expected = |released| {
+            if resize {
+                BlockDrag::Resize
+            } else {
+                BlockDrag::Move { copy, released }
+            }
+        };
+        context.io_mut().add_mouse_pos_event(start);
+        context.io_mut().add_key_event(Key::ModCtrl, copy);
         context.io_mut().add_mouse_button_event(MouseButton::Left, true);
-        let start = gizmo_frame(&mut context, &mut gizmo, &camera, &settings, target, true);
-        assert_eq!(start.resizing, resize);
-        context.io_mut().add_key_event(Key::ModShift, !resize);
-        context
-            .io_mut()
-            .add_mouse_pos_event([origin[0] + 32.0, origin[1] - 32.0]);
-        let dragged = gizmo_frame(&mut context, &mut gizmo, &camera, &settings, target, true);
-        assert_eq!(dragged.resizing, resize);
+        let pressed = gizmo_frame(&mut context, &mut gizmo, &camera, target, true);
+        assert_eq!(pressed.drag, Some(expected(false)));
+        context.io_mut().add_key_event(Key::ModCtrl, !copy);
+        context.io_mut().add_mouse_pos_event([start[0] + 32.0, start[1] - 32.0]);
+        let dragged = gizmo_frame(&mut context, &mut gizmo, &camera, target, true);
+        assert_eq!(dragged.drag, Some(expected(false)));
         assert_eq!(dragged.selection.width(), if resize { 4 } else { 3 });
         assert_eq!(
             dragged.selection.min,
             if resize { selection.min } else { Coord::new(4, 4, 1) }
         );
-        target.selection = dragged.selection;
+        if resize {
+            target.selection = dragged.selection;
+        }
         context.io_mut().add_mouse_button_event(MouseButton::Left, false);
-        context.io_mut().add_mouse_pos_event([2000.0, -2000.0]);
-        let released = gizmo_frame(&mut context, &mut gizmo, &camera, &settings, target, false);
-        assert_eq!(released.resizing, resize);
+        let released = gizmo_frame(&mut context, &mut gizmo, &camera, target, false);
+        assert_eq!(released.drag, Some(expected(true)));
         assert!(released.captures_mouse);
         assert!(!gizmo.is_interacting());
-        assert_eq!(released.selection.max, Coord::new(10, 10, 1));
-    }
-}
-
-#[test]
-fn rotation_shortcuts_work_with_both_presets_and_a_custom_modifier_binding() {
-    let _guard = IMGUI_CONTEXT.lock().unwrap();
-    for (preset, modifier, key, custom) in [
-        (KeybindPreset::Default, None, Key::R, false),
-        (KeybindPreset::StrongDmm, Some(Key::ModShift), Key::R, false),
-        (KeybindPreset::Default, Some(Key::ModCtrl), Key::T, true),
-    ] {
-        let mut context = rectangle_context();
-        let mut settings = Settings {
-            keybindings: preset.bindings(),
-            ..Settings::default()
-        };
-        if custom {
-            settings
-                .keybindings
-                .rebind(KeybindAction::Rotate, KeyBinding::with_ctrl(Key::T));
-        }
-        let mut camera = Controller::new();
-        camera.resize(800, 600);
-        let mut gizmo = GizmoState::default();
-        let target = BlockGizmoTarget {
-            selection: Selection::from_drag(Coord::new(2, 2, 1), Coord::new(4, 5, 1)),
-            rotation: SelectionRotation::Original,
-            map_size: Size { x: 10, y: 10, z: 1 },
-            tile_size: 32,
-            kind: BlockGizmoKind::Selection,
-        };
-        context.io_mut().add_mouse_pos_event([400.0, 300.0]);
-        if let Some(modifier) = modifier {
-            context.io_mut().add_key_event(modifier, true);
-        }
-        context.io_mut().add_key_event(key, true);
-        let pressed = gizmo_frame(&mut context, &mut gizmo, &camera, &settings, target, true);
-        assert!(!pressed.resizing);
-        context.io_mut().add_key_event(key, false);
-        let released = gizmo_frame(&mut context, &mut gizmo, &camera, &settings, target, true);
-        assert_eq!(released.rotation, SelectionRotation::Clockwise);
-        assert_eq!(released.selection, target.selection);
     }
 }
 
@@ -466,21 +520,14 @@ fn rectangle_ui_moves_and_cuts_on_a_created_level() {
         app.session.set_tool(Tool::BlockSelect);
         app.step();
 
-        app.pointer(app.tile(5, 8), false);
-        app.pointer(app.tile(5, 8), true);
-        app.pointer(app.tile(6, 9), true);
-        app.pointer(app.tile(6, 9), false);
+        app.drag(app.tile(5, 8), app.tile(6, 9));
         let selection = Selection::from_drag(Coord::new(5, 8, z), Coord::new(6, 9, z));
         assert_eq!(app.session.selection(), Some(selection), "created: {created}");
 
-        let center = [
-            (app.tile(5, 8)[0] + app.tile(6, 9)[0]) * 0.5,
-            (app.tile(5, 8)[1] + app.tile(6, 9)[1]) * 0.5,
-        ];
+        let center = center_of(&app, selection);
         app.pointer(center, false);
         app.pointer(center, true);
         app.pointer([center[0] + 64.0, center[1]], true);
-        app.pointer([center[0] + 64.0, center[1]], false);
         let pending = app.view.gestures.block_placement.map(|placement| placement.target);
         assert_eq!(
             pending,
@@ -502,8 +549,8 @@ fn rectangle_ui_moves_and_cuts_on_a_created_level() {
             "created: {created}"
         );
 
-        app.key(Key::Enter, true);
-        app.key(Key::Enter, false);
+        app.pointer([center[0] + 64.0, center[1]], false);
+        assert!(app.view.gestures.block_placement.is_none());
         let location = |app: &RectangleUiHarness| {
             app.session
                 .state
@@ -514,10 +561,7 @@ fn rectangle_ui_moves_and_cuts_on_a_created_level() {
         };
         assert_eq!(location(&app), Some(Coord::new(7, 8, z)), "created: {created}");
 
-        app.key(Key::ModCtrl, true);
-        app.key(Key::X, true);
-        app.key(Key::X, false);
-        app.key(Key::ModCtrl, false);
+        ctrl_key(&mut app, Key::X);
         assert_eq!(location(&app), None, "created: {created}");
         assert!(app.session.clipboard().is_some(), "created: {created}");
     }

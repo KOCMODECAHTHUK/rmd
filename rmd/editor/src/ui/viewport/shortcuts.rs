@@ -8,7 +8,7 @@ use crate::{
     ui::{LAYER_KEYS, UiState, request_level_change},
 };
 
-const TOOL_KEYS: [(KeybindAction, Tool); 8] = [
+const TOOL_KEYS: [(KeybindAction, Tool); 9] = [
     (KeybindAction::PlaceTool, Tool::Place),
     (KeybindAction::SelectTool, Tool::Select),
     (KeybindAction::NodeTool, Tool::Node),
@@ -16,6 +16,7 @@ const TOOL_KEYS: [(KeybindAction, Tool); 8] = [
     (KeybindAction::DeleteTool, Tool::Delete),
     (KeybindAction::ReplaceTool, Tool::Replace),
     (KeybindAction::FillTool, Tool::Fill),
+    (KeybindAction::RectFillTool, Tool::RectFill),
     (KeybindAction::CommentTool, Tool::Comment),
 ];
 

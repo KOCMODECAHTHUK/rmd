@@ -302,7 +302,6 @@ pub struct EditorState {
     pub palette: Option<dmm::Prefab>,
     recent_prefabs: Vec<dmm::Prefab>,
     clipboard: Option<TileBlock>,
-    clipboard_revision: u64,
 }
 
 impl Default for EditorState {
@@ -319,7 +318,6 @@ impl EditorState {
             palette: None,
             recent_prefabs: Vec::new(),
             clipboard: None,
-            clipboard_revision: 0,
         }
     }
 
@@ -417,12 +415,7 @@ impl EditorState {
 
     pub fn clipboard(&self) -> Option<&TileBlock> { self.clipboard.as_ref() }
 
-    pub fn set_clipboard(&mut self, block: TileBlock) {
-        self.clipboard = Some(block);
-        self.clipboard_revision = self.clipboard_revision.wrapping_add(1);
-    }
-
-    pub fn clipboard_revision(&self) -> u64 { self.clipboard_revision }
+    pub fn set_clipboard(&mut self, block: TileBlock) { self.clipboard = Some(block); }
 
     pub fn recent_prefabs(&self) -> &[dmm::Prefab] { &self.recent_prefabs }
 

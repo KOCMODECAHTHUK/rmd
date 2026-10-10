@@ -3,31 +3,21 @@ use dmm::Coord;
 use editor::{
     conflict::{Region, Side},
     document::{DocumentId, Selection},
-    tool::{SelectionMask, SelectionPlacement, SelectionRotation, Tool, rotated_selection_at},
+    tool::{SelectionMask, SelectionPlacement, SelectionRotation, Tool},
 };
 
 use super::ViewFrame;
 use crate::{
-    gizmo::{BlockGizmoKind, BlockGizmoTarget, GizmoMapView},
+    gizmo::{BlockDrag, BlockGizmoTarget, GizmoMapView},
     pacing::FrameDemand,
     session::{BlockPreviewSource, Session},
-    settings::Settings,
     ui::{
-        BlockPlacementAction,
-        PasteAction,
         PendingBlockPlacement,
-        PendingPaste,
-        PlacementControls,
         RectangleGesture,
         UiState,
-        block_controls_placement,
-        block_placement_controls_layout,
         conflict_controls_layout,
         draw_block_outline,
-        draw_block_placement_controls,
         draw_conflict_controls,
-        draw_paste_controls,
-        paste_controls,
         rectangle_drag_coord,
         restore_rectangle_gesture,
     },
@@ -38,7 +28,7 @@ pub(in crate::ui) struct ViewGestures {
     pub(super) block_selection_anchor: Option<Coord>,
     pub(super) rectangle_gesture: Option<RectangleGesture>,
     pub(super) block_placement: Option<PendingBlockPlacement>,
-    pub(super) paste: Option<PendingPaste>,
+    pub(super) fill_anchor: Option<Coord>,
 }
 
 impl ViewGestures {
@@ -46,33 +36,24 @@ impl ViewGestures {
         restore_rectangle_gesture(session, id, &mut self.rectangle_gesture);
         self.block_selection_anchor = None;
         self.block_placement = None;
-        self.paste = None;
+        self.fill_anchor = None;
     }
 
     pub(super) const fn is_busy(&self) -> bool {
-        self.rectangle_gesture.is_some() || self.block_placement.is_some() || self.paste.is_some()
+        self.rectangle_gesture.is_some() || self.block_placement.is_some() || self.fill_anchor.is_some()
     }
 
-    pub(super) fn displayed(&self, source: Selection) -> (Selection, SelectionRotation) {
-        self.block_placement
-            .map_or((source, SelectionRotation::Original), |placement| {
-                (placement.target, placement.rotation)
-            })
+    pub(super) fn displayed(&self, source: Selection) -> Selection {
+        self.block_placement.map_or(source, |placement| placement.target)
     }
-}
-
-pub(super) struct BlockActions {
-    paste: Option<(PasteAction, PendingPaste)>,
-    placement: Option<(BlockPlacementAction, PendingBlockPlacement)>,
 }
 
 pub(super) fn shows_block_selection(tool: Tool) -> bool { matches!(tool, Tool::BlockSelect | Tool::Fill) }
 
-pub(super) fn sync_gestures(session: &Session, gestures: &mut ViewGestures, tool: Tool) -> Option<SelectionMask> {
+pub(super) fn sync_gestures(session: &Session, gestures: &mut ViewGestures, tool: Tool) {
     if tool != Tool::BlockSelect {
         gestures.block_selection_anchor = None;
         gestures.block_placement = None;
-        gestures.paste = None;
     } else {
         if gestures
             .block_selection_anchor
@@ -87,51 +68,11 @@ pub(super) fn sync_gestures(session: &Session, gestures: &mut ViewGestures, tool
         {
             gestures.block_placement = None;
         }
-
-        if let Some(pending) = gestures.paste.as_mut() {
-            pending.min.z = session.z();
-        }
     }
 
-    let paste_mask = gestures
-        .paste
-        .and_then(|pending| session.clipboard_selection_mask(pending.min, pending.rotation));
-    if gestures.paste.is_some() && paste_mask.is_none() {
-        gestures.paste = None;
+    if tool != Tool::RectFill || gestures.fill_anchor.is_some_and(|anchor| anchor.z != session.z()) {
+        gestures.fill_anchor = None;
     }
-
-    paste_mask
-}
-
-pub(super) fn block_controls_contain(
-    ui: &Ui, session: &Session, frame: &ViewFrame<'_>, tool: Tool, paste_target: Option<Selection>,
-    is_rotation_open: bool,
-) -> bool {
-    let hit = match frame.gestures.paste {
-        Some(_) => paste_controls(is_rotation_open, paste_target).map(|target| (PlacementControls::Paste, target)),
-        None => block_controls_placement(
-            tool,
-            frame.gestures.rectangle_gesture.is_some(),
-            is_rotation_open,
-            session.selection(),
-            frame.gestures.block_placement,
-        )
-        .map(|placement| (PlacementControls::Block, placement.target)),
-    };
-
-    hit.is_some_and(|(controls, target)| {
-        let (_, bounds) = block_placement_controls_layout(
-            ui,
-            frame.camera,
-            controls,
-            target,
-            session.options.tile_size,
-            frame.layout.viewport.min,
-            frame.layout.controls_area(),
-        );
-
-        bounds.contains(frame.mouse)
-    })
 }
 
 pub(super) fn conflict_controls_contain(ui: &Ui, session: &Session, frame: &ViewFrame<'_>, regions: &[Region]) -> bool {
@@ -157,9 +98,7 @@ pub(super) fn conflict_controls_contain(ui: &Ui, session: &Session, frame: &View
 }
 
 pub(super) fn prepare_block_preview(session: &mut Session, frame: &ViewFrame<'_>) {
-    if let Some(pending) = frame.gestures.paste {
-        session.prepare_block_preview(frame.id, BlockPreviewSource::Clipboard, pending.min, pending.rotation);
-    } else if let Some(placement) = frame.gestures.block_placement
+    if let Some(placement) = frame.gestures.block_placement
         && session.tool() == Tool::BlockSelect
     {
         session.prepare_block_preview(
@@ -169,43 +108,17 @@ pub(super) fn prepare_block_preview(session: &mut Session, frame: &ViewFrame<'_>
                 mode: session.selection_mode(),
             }),
             placement.target.min,
-            placement.rotation,
+            SelectionRotation::Original,
         );
     }
 }
 
 impl UiState {
     pub(super) fn draw_block_gizmo(
-        &mut self, ui: &Ui, session: &mut Session, settings: &Settings, frame: &mut ViewFrame<'_>,
-        paste_target: Option<Selection>, gizmo_view: GizmoMapView,
+        &mut self, ui: &Ui, session: &mut Session, frame: &mut ViewFrame<'_>, gizmo_view: GizmoMapView,
     ) -> bool {
         let gestures = &mut *frame.gestures;
         let map_size = session.map().map(|map| map.size());
-        if let (Some(pending), Some(target), Some(size)) = (gestures.paste, paste_target, map_size) {
-            let response = self.gizmo.draw_block(
-                ui,
-                settings,
-                frame.camera,
-                BlockGizmoTarget {
-                    selection: target,
-                    rotation: pending.rotation,
-                    map_size: size,
-                    tile_size: session.options.tile_size,
-                    kind: BlockGizmoKind::Clipboard,
-                },
-                gizmo_view,
-            );
-
-            if response.selection.min != target.min || response.rotation != pending.rotation {
-                gestures.paste = Some(PendingPaste {
-                    min: response.selection.min,
-                    rotation: response.rotation,
-                });
-            }
-
-            return response.captures_mouse;
-        }
-
         if gestures.block_selection_anchor.is_some() {
             self.gizmo.cancel();
 
@@ -218,43 +131,52 @@ impl UiState {
             return false;
         };
 
-        let (displayed, rotation) = gestures.displayed(source);
         let response = self.gizmo.draw_block(
             ui,
-            settings,
             frame.camera,
             BlockGizmoTarget {
-                selection: displayed,
-                rotation,
+                selection: source,
                 map_size: size,
                 tile_size: session.options.tile_size,
-                kind: if gestures.block_placement.is_some() {
-                    BlockGizmoKind::Placement
-                } else {
-                    BlockGizmoKind::Selection
-                },
             },
             gizmo_view,
         );
 
-        if response.resizing {
-            gestures.rectangle_gesture.get_or_insert(RectangleGesture {
-                start: session.selection_mask(),
-                z: session.z(),
-            });
-            session.try_select_block(SelectionMask {
-                bounds: response.selection,
-                mode: session.selection_mode(),
-            });
-        } else if response.selection != displayed || response.rotation != rotation {
-            gestures.block_selection_anchor = None;
-            gestures.block_placement = rotated_selection_at(source, response.selection.min, response.rotation)
-                .filter(|target| *target != source || response.rotation != SelectionRotation::Original)
-                .map(|target| PendingBlockPlacement {
-                    source,
-                    target,
-                    rotation: response.rotation,
+        match response.drag {
+            Some(BlockDrag::Resize) => {
+                gestures.rectangle_gesture.get_or_insert(RectangleGesture {
+                    start: session.selection_mask(),
+                    z: session.z(),
                 });
+                session.try_select_block(SelectionMask {
+                    bounds: response.selection,
+                    mode: session.selection_mode(),
+                });
+            },
+            Some(BlockDrag::Move { copy, released }) => {
+                gestures.block_placement = (response.selection != source).then_some(PendingBlockPlacement {
+                    source,
+                    target: response.selection,
+                });
+                if released {
+                    if gestures.block_placement.take().is_some() {
+                        let placement = if copy {
+                            SelectionPlacement::Copy
+                        } else {
+                            SelectionPlacement::Move
+                        };
+                        session.place_selected_block_with_mode(
+                            response.selection.min,
+                            SelectionRotation::Original,
+                            placement,
+                            session.selection_mode(),
+                        );
+                    }
+
+                    self.gizmo.cancel();
+                }
+            },
+            None => gestures.block_placement = None,
         }
 
         response.captures_mouse
@@ -264,18 +186,20 @@ impl UiState {
         &self, ui: &Ui, session: &mut Session, frame: &mut ViewFrame<'_>, coord: Coord, is_left_clicked: bool,
     ) {
         let gestures = &mut *frame.gestures;
-        if gestures.block_placement.is_some()
-            || gestures.paste.is_some()
-            || !is_left_clicked
-            || !session.can_edit_at(coord)
-        {
+        if gestures.block_placement.is_some() || !is_left_clicked || !session.can_edit_at(coord) {
             return;
         }
 
-        gestures.rectangle_gesture = Some(RectangleGesture {
-            start: session.selection_mask(),
-            z: session.z(),
-        });
+        let start = session.selection_mask();
+        gestures.rectangle_gesture = Some(RectangleGesture { start, z: session.z() });
+        // clicking outside the selection clears it, dragging draws a new one
+        if start.is_some() {
+            session.select_block(None);
+            gestures.block_selection_anchor = Some(coord);
+
+            return;
+        }
+
         if session.try_select_block(SelectionMask {
             bounds: Selection::from_drag(coord, coord),
             mode: self.block_selection_options.drawing_mode(ui.io().key_shift()),
@@ -286,15 +210,8 @@ impl UiState {
 
     pub(super) fn drag_rectangle(&self, ui: &Ui, session: &mut Session, frame: &mut ViewFrame<'_>, is_left_down: bool) {
         if let Some(anchor) = frame.gestures.block_selection_anchor
-            && let Some(size) = session.map().map(|map| map.size())
-            && let Some(coord) = rectangle_drag_coord(
-                frame.camera,
-                frame.mouse,
-                frame.layout.viewport.min,
-                size,
-                session.options.tile_size,
-                anchor.z,
-            )
+            && let Some(coord) = drag_coord(session, frame, anchor.z)
+            && (coord != anchor || session.selection().is_some())
         {
             session.try_select_block(SelectionMask {
                 bounds: Selection::from_drag(anchor, coord),
@@ -312,32 +229,63 @@ impl UiState {
         }
     }
 
-    pub(super) fn draw_block_overlays(
-        &mut self, ui: &Ui, session: &Session, frame: &ViewFrame<'_>, tool: Tool, paste_mask: Option<SelectionMask>,
-        gizmo_view: GizmoMapView,
+    pub(super) fn start_fill_rect(
+        &self, session: &Session, frame: &mut ViewFrame<'_>, coord: Coord, is_left_clicked: bool,
     ) {
-        let viewport = frame.layout.viewport;
-        let block_overlay = match (frame.gestures.paste, paste_mask) {
-            (Some(pending), Some(mask)) => {
-                draw_block_outline(ui, session, frame.camera, mask.bounds, mask.mode, viewport);
+        if is_left_clicked && session.can_edit_at(coord) {
+            frame.gestures.fill_anchor = Some(coord);
+        }
+    }
 
-                Some((mask.bounds, pending.rotation))
-            },
-            _ if shows_block_selection(session.tool()) => session.selection().map(|source| {
-                let (displayed, rotation) = frame.gestures.displayed(source);
-                draw_block_outline(ui, session, frame.camera, displayed, session.selection_mode(), viewport);
-
-                (displayed, rotation)
-            }),
-            _ => None,
+    pub(super) fn drag_fill_rect(&self, ui: &Ui, session: &mut Session, frame: &mut ViewFrame<'_>, is_left_down: bool) {
+        let Some(anchor) = frame.gestures.fill_anchor else {
+            return;
         };
 
-        if block_overlay.is_some() {
+        if !is_left_down {
+            frame.gestures.fill_anchor = None;
+        }
+
+        let Some(coord) = drag_coord(session, frame, anchor.z) else {
+            return;
+        };
+
+        let mask = SelectionMask {
+            bounds: Selection::from_drag(anchor, coord),
+            mode: self.block_selection_options.drawing_mode(ui.io().key_shift()),
+        };
+        if is_left_down {
+            if !session.can_fill_rect(mask) {
+                ui.tooltip_text(if session.palette().is_none() {
+                    "Choose a brush to fill with"
+                } else {
+                    "This rectangle can't be filled here"
+                });
+            }
+
+            draw_block_outline(ui, session, frame.camera, mask.bounds, mask.mode, frame.layout.viewport);
+        } else {
+            session.fill_rect(mask);
+        }
+    }
+
+    pub(super) fn draw_block_overlays(
+        &mut self, ui: &Ui, session: &Session, frame: &ViewFrame<'_>, tool: Tool, gizmo_view: GizmoMapView,
+    ) {
+        let viewport = frame.layout.viewport;
+        if frame.gestures.fill_anchor.is_some() {
             self.raise_demand(FrameDemand::Throttled);
         }
 
-        if let Some((displayed, rotation)) = block_overlay
-            && tool == Tool::BlockSelect
+        let Some(source) = session.selection().filter(|_| shows_block_selection(tool)) else {
+            return;
+        };
+
+        let displayed = frame.gestures.displayed(source);
+        draw_block_outline(ui, session, frame.camera, displayed, session.selection_mode(), viewport);
+        self.raise_demand(FrameDemand::Throttled);
+
+        if tool == Tool::BlockSelect
             && frame.gestures.block_selection_anchor.is_none()
             && let Some(map_size) = session.map().map(|map| map.size())
         {
@@ -346,130 +294,38 @@ impl UiState {
                 frame.camera,
                 BlockGizmoTarget {
                     selection: displayed,
-                    rotation,
                     map_size,
                     tile_size: session.options.tile_size,
-                    kind: if frame.gestures.paste.is_some() {
-                        BlockGizmoKind::Clipboard
-                    } else if frame.gestures.block_placement.is_some() {
-                        BlockGizmoKind::Placement
-                    } else {
-                        BlockGizmoKind::Selection
-                    },
                 },
                 gizmo_view,
             );
         }
     }
 
-    pub(super) fn draw_block_controls(
-        &mut self, ui: &Ui, session: &mut Session, frame: &ViewFrame<'_>, tool: Tool, paste_target: Option<Selection>,
-        conflict_regions: &[Region],
-    ) -> BlockActions {
-        let viewport_min = frame.layout.viewport.min;
-        let controls_area = frame.layout.controls_area();
-        let is_rotation_open = self.gizmo.block_rotation_open();
-        let paste = frame
-            .gestures
-            .paste
-            .zip(paste_controls(is_rotation_open, paste_target))
-            .and_then(|(pending, target)| {
-                let can_paste = session.can_paste_clipboard(pending.min, pending.rotation);
-
-                draw_paste_controls(
-                    ui,
-                    frame.camera,
-                    target,
-                    session.options.tile_size,
-                    viewport_min,
-                    controls_area,
-                    can_paste,
-                )
-                .map(|action| (action, pending))
-            });
+    pub(super) fn draw_conflict_overlay_controls(
+        &mut self, ui: &Ui, session: &mut Session, frame: &ViewFrame<'_>, conflict_regions: &[Region],
+    ) {
         draw_conflict_controls(
             ui,
             session,
             frame.id,
             frame.camera,
             conflict_regions,
-            viewport_min,
-            controls_area,
+            frame.layout.viewport.min,
+            frame.layout.controls_area(),
         );
-
-        let placement = frame
-            .gestures
-            .paste
-            .is_none()
-            .then(|| {
-                block_controls_placement(
-                    tool,
-                    frame.gestures.rectangle_gesture.is_some(),
-                    is_rotation_open,
-                    session.selection(),
-                    frame.gestures.block_placement,
-                )
-            })
-            .flatten()
-            .and_then(|placement| {
-                draw_block_placement_controls(
-                    ui,
-                    frame.camera,
-                    placement,
-                    viewport_min,
-                    controls_area,
-                    session,
-                    &mut self.block_selection_options,
-                )
-                .map(|action| (action, placement))
-            });
-
-        BlockActions { paste, placement }
     }
+}
 
-    pub(super) fn apply_block_actions(
-        &mut self, session: &mut Session, gestures: &mut ViewGestures, actions: BlockActions,
-    ) {
-        if let Some((action, pending)) = actions.paste {
-            if action == PasteAction::Paste {
-                session.paste_clipboard(pending.min, pending.rotation);
-            }
+fn drag_coord(session: &Session, frame: &ViewFrame<'_>, z: u32) -> Option<Coord> {
+    let size = session.map()?.size();
 
-            gestures.paste = None;
-            self.gizmo.cancel();
-        }
-
-        let Some((action, placement)) = actions.placement else {
-            return;
-        };
-
-        let is_finished = match action {
-            BlockPlacementAction::Move => session.place_selected_block_with_mode(
-                placement.target.min,
-                placement.rotation,
-                SelectionPlacement::Move,
-                session.selection_mode(),
-            ),
-            BlockPlacementAction::Copy => session.place_selected_block_with_mode(
-                placement.target.min,
-                placement.rotation,
-                SelectionPlacement::Copy,
-                session.selection_mode(),
-            ),
-            BlockPlacementAction::Fill => {
-                session.fill_selected_block(placement.target.min, placement.rotation, session.selection_mode())
-            },
-            BlockPlacementAction::Cancel => {
-                if gestures.block_placement.is_none() {
-                    session.select_block(None);
-                }
-
-                true
-            },
-        };
-        if is_finished {
-            gestures.block_placement = None;
-            self.gizmo.cancel();
-        }
-    }
+    rectangle_drag_coord(
+        frame.camera,
+        frame.mouse,
+        frame.layout.viewport.min,
+        size,
+        session.options.tile_size,
+        z,
+    )
 }

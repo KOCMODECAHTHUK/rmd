@@ -1,6 +1,6 @@
 use dear_imgui_rs::{MouseButton, Ui};
 use dmm::Coord;
-use editor::{document::Selection, tool::Tool};
+use editor::tool::Tool;
 use render::{InteractionMode, MapViewInteraction, PickRequest};
 
 use super::{
@@ -48,14 +48,14 @@ impl Clicks {
 
 pub(super) fn configure_tool_interaction(tool: Tool, interaction: &mut MapViewInteraction) {
     interaction.mode = match (tool, interaction.mode) {
-        (Tool::Place | Tool::BlockSelect | Tool::Fill, _) => InteractionMode::Place,
+        (Tool::Place | Tool::BlockSelect | Tool::Fill | Tool::RectFill, _) => InteractionMode::Place,
         (Tool::Select | Tool::Replace, InteractionMode::Select { pick }) => InteractionMode::Select { pick },
         (Tool::Delete, InteractionMode::Delete { pick }) => InteractionMode::Delete { pick },
         (Tool::Select | Tool::Replace | Tool::Node | Tool::Comment, _) => InteractionMode::Select { pick: None },
         (Tool::Delete, _) => InteractionMode::Delete { pick: None },
     };
     match tool {
-        Tool::Place | Tool::Node | Tool::BlockSelect | Tool::Fill | Tool::Comment => {
+        Tool::Place | Tool::Node | Tool::BlockSelect | Tool::Fill | Tool::RectFill | Tool::Comment => {
             interaction.cursor = None;
             interaction.selected = None;
         },
@@ -68,7 +68,7 @@ pub(super) fn configure_tool_interaction(tool: Tool, interaction: &mut MapViewIn
 
 pub(super) fn interaction_mode(tool: Tool) -> InteractionMode {
     match tool {
-        Tool::Place | Tool::BlockSelect | Tool::Fill => InteractionMode::Place,
+        Tool::Place | Tool::BlockSelect | Tool::Fill | Tool::RectFill => InteractionMode::Place,
         Tool::Select | Tool::Replace | Tool::Node | Tool::Comment => InteractionMode::Select { pick: None },
         Tool::Delete => InteractionMode::Delete { pick: None },
     }
@@ -190,7 +190,7 @@ impl UiState {
     #[allow(clippy::too_many_arguments)]
     pub(super) fn draw_tool_gizmo(
         &mut self, ui: &Ui, session: &mut Session, settings: &Settings, frame: &mut ViewFrame<'_>, tool: Tool,
-        paste_target: Option<Selection>, gizmo_view: GizmoMapView,
+        gizmo_view: GizmoMapView,
     ) -> bool {
         match tool {
             Tool::Select => {
@@ -210,8 +210,8 @@ impl UiState {
                     .draw_placement_direction(ui, session, settings, frame.camera, frame.coord, gizmo_view)
                     .captures_mouse
             },
-            Tool::BlockSelect => self.draw_block_gizmo(ui, session, settings, frame, paste_target, gizmo_view),
-            Tool::Node | Tool::Comment | Tool::Delete | Tool::Replace | Tool::Fill => {
+            Tool::BlockSelect => self.draw_block_gizmo(ui, session, frame, gizmo_view),
+            Tool::Node | Tool::Comment | Tool::Delete | Tool::Replace | Tool::Fill | Tool::RectFill => {
                 self.gizmo.cancel();
 
                 false
@@ -274,6 +274,7 @@ impl UiState {
             Tool::BlockSelect => self.start_rectangle(ui, session, frame, coord, clicks.is_left_clicked),
             Tool::Delete | Tool::Replace => self.pick_at(ui, session, frame, coord, pixel, clicks, is_alternate),
             Tool::Fill => self.fill_at(ui, session, coord, clicks.is_left_clicked),
+            Tool::RectFill => self.start_fill_rect(session, frame, coord, clicks.is_left_clicked),
         }
     }
 
@@ -345,7 +346,7 @@ impl UiState {
 
     fn fill_at(&mut self, ui: &Ui, session: &mut Session, coord: Coord, is_left_clicked: bool) {
         if session.selection_mask().is_some_and(|mask| !mask.includes(coord)) {
-            ui.tooltip_text("Click a selected tile, or Clear selection to fill elsewhere");
+            ui.tooltip_text("Click a selected tile, or press Escape to clear the selection");
         }
 
         if is_left_clicked

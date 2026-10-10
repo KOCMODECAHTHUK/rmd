@@ -10,7 +10,7 @@ use dmm::{Coord, Prefab, PrefabInstanceId, Size};
 use editor::{
     conflict::Side,
     document::{DocumentId, MapDocument, Selection},
-    tool::{BlockSelectionMode, SelectionMask, SelectionRotation, Tool},
+    tool::{BlockSelectionMode, SelectionMask, Tool},
 };
 use render::{HighlightStyle, InteractionMode, MapViewInteraction, MapViewRect, PickRequest, PlacementFlash};
 
@@ -29,7 +29,7 @@ use super::{
 };
 use crate::{
     camera::Controller,
-    gizmo::{BlockGizmoKind, BlockGizmoTarget, GizmoMapView, GizmoState},
+    gizmo::{BlockDrag, BlockGizmoTarget, GizmoMapView, GizmoState},
     session::{
         LevelChange,
         Session,

@@ -9,7 +9,6 @@ use dmm::{Coord, Size};
 use editor::{
     command::EditGroupId,
     document::{PrefabInstanceId, Selection, VarMutation},
-    tool::SelectionRotation,
 };
 
 use crate::{
@@ -92,7 +91,6 @@ struct DragState {
 #[derive(Debug, Clone, Copy)]
 struct BlockDragState {
     start_selection: Selection,
-    handle: Handle,
     action: BlockDragAction,
     start_mouse: [f32; 2],
     zoom: f32,
@@ -102,19 +100,8 @@ struct BlockDragState {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum BlockDragAction {
-    Move,
+    Move { copy: bool },
     Resize { x: i8, y: i8 },
-}
-
-impl BlockDragAction {
-    fn is_resize(self) -> bool { matches!(self, Self::Resize { .. }) }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum BlockGizmoKind {
-    Selection,
-    Placement,
-    Clipboard,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -188,21 +175,6 @@ enum PendingDirectionOutcome {
     Cancel,
 }
 
-#[derive(Debug, Clone, Copy)]
-struct BlockDirectionGesture {
-    pressed_at: f64,
-    phase: BlockDirectionPhase,
-}
-
-#[derive(Debug, Clone, Copy)]
-enum BlockDirectionPhase {
-    Pending,
-    Open {
-        origin: [f32; 2],
-        last_hovered: Option<Dir>,
-    },
-}
-
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct GizmoResponse {
     pub captures_mouse: bool,
@@ -212,17 +184,20 @@ pub(crate) struct GizmoResponse {
 pub(crate) struct BlockGizmoResponse {
     pub captures_mouse: bool,
     pub selection: Selection,
-    pub rotation: SelectionRotation,
-    pub resizing: bool,
+    pub drag: Option<BlockDrag>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum BlockDrag {
+    Move { copy: bool, released: bool },
+    Resize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct BlockGizmoTarget {
     pub selection: Selection,
-    pub rotation: SelectionRotation,
     pub map_size: Size,
     pub tile_size: u32,
-    pub kind: BlockGizmoKind,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -237,26 +212,17 @@ pub(crate) struct GizmoState {
     drag: Option<DragState>,
     direction: Option<DirectionGesture>,
     block_drag: Option<BlockDragState>,
-    block_direction: Option<BlockDirectionGesture>,
 }
 
 impl GizmoState {
     pub(crate) const fn is_interacting(&self) -> bool {
-        self.drag.is_some() || self.direction.is_some() || self.block_drag.is_some() || self.block_direction.is_some()
-    }
-
-    pub(crate) fn block_rotation_open(&self) -> bool {
-        matches!(
-            self.block_direction.map(|gesture| gesture.phase),
-            Some(BlockDirectionPhase::Open { .. })
-        )
+        self.drag.is_some() || self.direction.is_some() || self.block_drag.is_some()
     }
 
     pub(crate) fn cancel(&mut self) {
         self.drag = None;
         self.direction = None;
         self.block_drag = None;
-        self.block_direction = None;
     }
 
     pub(crate) fn draw(
@@ -264,7 +230,6 @@ impl GizmoState {
         map_view: GizmoMapView,
     ) -> GizmoResponse {
         self.block_drag = None;
-        self.block_direction = None;
         let Some(mut target) = session.gizmo_transform() else {
             self.drag = None;
             self.direction = None;
@@ -404,47 +369,39 @@ impl GizmoState {
     }
 
     pub(crate) fn draw_block(
-        &mut self, ui: &Ui, settings: &Settings, camera: &Controller, target: BlockGizmoTarget, map_view: GizmoMapView,
+        &mut self, ui: &Ui, camera: &Controller, target: BlockGizmoTarget, map_view: GizmoMapView,
     ) -> BlockGizmoResponse {
         self.drag = None;
         self.direction = None;
 
         let BlockGizmoTarget {
             mut selection,
-            mut rotation,
             map_size,
             tile_size,
-            kind,
         } = target;
 
         let mouse = ui.io().mouse_pos();
-        let scale = dpi(ui);
-        let initial_origin = block_center_origin(camera, map_view.min, selection, tile_size);
         let was_dragging = self.block_drag.is_some();
-        let mut resizing = self.block_drag.is_some_and(|drag| drag.action.is_resize());
-        let (was_direction_active, requested_rotation) =
-            self.update_block_direction(ui, settings, initial_origin, rotation, map_view);
-        if let Some(requested) = requested_rotation {
-            rotation = requested;
-        }
-
-        let hovered_handle = map_view
+        let hovered = map_view
             .hovered
-            .then(|| handle_at(mouse, initial_origin, map_view.min, map_view.max, scale))
+            .then(|| {
+                block_hit_at(
+                    camera,
+                    map_view,
+                    selection,
+                    tile_size,
+                    mouse,
+                    dpi(ui),
+                    ui.io().key_ctrl(),
+                )
+            })
             .flatten();
-        let resize_handle = (map_view.hovered && kind == BlockGizmoKind::Selection)
-            .then(|| resize_handle_at(camera, map_view, selection, tile_size, mouse, scale))
-            .flatten();
-        let action = block_drag_action(kind, ui.io().key_shift(), hovered_handle, resize_handle);
-        if self.block_direction.is_none()
-            && self.block_drag.is_none()
-            && let Some((handle, action)) = action
+        if self.block_drag.is_none()
+            && let Some(action) = hovered
             && ui.is_mouse_clicked(MouseButton::Left)
         {
-            resizing = action.is_resize();
             self.block_drag = Some(BlockDragState {
                 start_selection: selection,
-                handle,
                 action,
                 start_mouse: mouse,
                 zoom: camera.camera.zoom.max(f32::EPSILON),
@@ -453,157 +410,60 @@ impl GizmoState {
             });
         }
 
-        if let Some(drag) = self.block_drag {
+        let drag = self.block_drag.map(|state| {
             if mouse.iter().all(|value| value.is_finite()) {
-                selection = dragged_block_selection(drag, mouse);
+                selection = dragged_block_selection(state, mouse);
             }
-            if !ui.is_mouse_down(MouseButton::Left) {
-                self.block_drag = None;
+
+            match state.action {
+                BlockDragAction::Move { copy } => BlockDrag::Move {
+                    copy,
+                    released: !ui.is_mouse_down(MouseButton::Left),
+                },
+                BlockDragAction::Resize { .. } => BlockDrag::Resize,
             }
+        });
+        if !ui.is_mouse_down(MouseButton::Left) {
+            self.block_drag = None;
         }
 
-        let origin = block_center_origin(camera, map_view.min, selection, tile_size);
-        let hovered = if self.block_drag.is_some() {
-            None
-        } else if map_view.hovered {
-            handle_at(mouse, origin, map_view.min, map_view.max, scale)
-        } else {
-            None
-        };
-
         BlockGizmoResponse {
-            captures_mouse: was_dragging
-                || self.block_drag.is_some()
-                || was_direction_active
-                || self.block_direction.is_some()
-                || resize_handle.is_some()
-                || hovered.is_some(),
+            captures_mouse: was_dragging || self.block_drag.is_some() || hovered.is_some(),
             selection,
-            rotation,
-            resizing,
+            drag,
         }
     }
 
     pub(crate) fn draw_block_overlay(
         &self, ui: &Ui, camera: &Controller, target: BlockGizmoTarget, map_view: GizmoMapView,
     ) {
-        let origin = block_center_origin(camera, map_view.min, target.selection, target.tile_size);
-        let hovered = if self.block_drag.is_some() {
-            None
-        } else if map_view.hovered {
-            handle_at(ui.io().mouse_pos(), origin, map_view.min, map_view.max, dpi(ui))
-        } else {
-            None
-        };
+        let dragging = self.block_drag.map(|drag| drag.action);
+        if !matches!(dragging, Some(BlockDragAction::Move { .. })) {
+            draw_resize_handles(ui, camera, map_view, target.selection, target.tile_size);
+        }
 
-        let hot = self.block_drag.map(|drag| drag.handle).or(hovered);
-        let open_wheel = self.block_direction.and_then(|gesture| match gesture.phase {
-            BlockDirectionPhase::Open {
-                origin, last_hovered, ..
-            } => Some((origin, last_hovered)),
-            BlockDirectionPhase::Pending => None,
+        let action = dragging.or_else(|| {
+            map_view
+                .hovered
+                .then(|| {
+                    block_hit_at(
+                        camera,
+                        map_view,
+                        target.selection,
+                        target.tile_size,
+                        ui.io().mouse_pos(),
+                        dpi(ui),
+                        ui.io().key_ctrl(),
+                    )
+                })
+                .flatten()
         });
 
-        if let Some((wheel_origin, hovered_direction)) = open_wheel {
-            if hovered_direction.is_some() {
-                ui.set_mouse_cursor(Some(MouseCursor::Hand));
-            }
-
-            let set = cardinal_direction_set();
-            draw_direction_wheel(
-                ui,
-                wheel_origin,
-                map_view,
-                set,
-                Some(rotation_direction(target.rotation)),
-                hovered_direction,
-            );
-        } else {
-            draw_gizmo(ui, origin, map_view, hot);
-            let resize_handle = if target.kind == BlockGizmoKind::Selection {
-                draw_resize_handles(ui, camera, map_view, target.selection, target.tile_size)
-            } else {
-                None
-            };
-            if let Some(handle) = hot {
-                ui.set_mouse_cursor(Some(handle.cursor()));
-            }
-
-            let action = self.block_drag.map(|drag| drag.action).or_else(|| {
-                block_drag_action(target.kind, ui.io().key_shift(), hovered, resize_handle).map(|(_, action)| action)
-            });
-            if let Some(BlockDragAction::Resize { x, y }) = action {
-                ui.set_mouse_cursor(Some(resize_cursor(x, y)));
-            }
+        match action {
+            Some(BlockDragAction::Resize { x, y }) => ui.set_mouse_cursor(Some(resize_cursor(x, y))),
+            Some(BlockDragAction::Move { .. }) => ui.set_mouse_cursor(Some(MouseCursor::ResizeAll)),
+            None => {},
         }
-    }
-
-    fn update_block_direction(
-        &mut self, ui: &Ui, settings: &Settings, origin: [f32; 2], rotation: SelectionRotation, map_view: GizmoMapView,
-    ) -> (bool, Option<SelectionRotation>) {
-        let rotation_key = settings.keybindings.get(KeybindAction::Rotate);
-        if self.block_direction.is_none()
-            && self.block_drag.is_none()
-            && map_view.hovered
-            && rotation_key.is_pressed(ui)
-        {
-            self.block_direction = Some(BlockDirectionGesture {
-                pressed_at: ui.time(),
-                phase: BlockDirectionPhase::Pending,
-            });
-        }
-
-        let was_active = self.block_direction.is_some();
-        let key_down = rotation_key.is_down(ui);
-        let key_released = rotation_key.is_released(ui);
-        let mut requested = None;
-        if let Some(mut gesture) = self.block_direction {
-            if matches!(gesture.phase, BlockDirectionPhase::Pending) {
-                match pending_direction_outcome(gesture.pressed_at, ui.time(), key_down, key_released) {
-                    PendingDirectionOutcome::Pending => {},
-                    PendingDirectionOutcome::Open => {
-                        gesture.phase = BlockDirectionPhase::Open {
-                            origin,
-                            last_hovered: None,
-                        };
-                    },
-                    PendingDirectionOutcome::Tap => {
-                        requested = Some(rotation.clockwise());
-                        self.block_direction = None;
-                    },
-                    PendingDirectionOutcome::Cancel => self.block_direction = None,
-                }
-            }
-
-            if let BlockDirectionPhase::Open {
-                origin,
-                mut last_hovered,
-            } = gesture.phase
-            {
-                if key_released || !key_down {
-                    self.block_direction = None;
-                } else {
-                    let hovered = direction_at(
-                        ui.io().mouse_pos(),
-                        origin,
-                        map_view.min,
-                        map_view.max,
-                        cardinal_direction_set(),
-                        dpi(ui),
-                    );
-                    if hovered != last_hovered {
-                        last_hovered = hovered;
-                        requested = hovered.map(direction_rotation);
-                    }
-                    gesture.phase = BlockDirectionPhase::Open { origin, last_hovered };
-                    self.block_direction = Some(gesture);
-                }
-            } else if self.block_direction.is_some() {
-                self.block_direction = Some(gesture);
-            }
-        }
-
-        (was_active, requested)
     }
 
     pub(crate) fn placement_coord(&self) -> Option<Coord> {
@@ -620,7 +480,6 @@ impl GizmoState {
     ) -> GizmoResponse {
         self.drag = None;
         self.block_drag = None;
-        self.block_direction = None;
         let Some(state) = session.placement_direction() else {
             self.direction = None;
 
@@ -798,16 +657,6 @@ fn tile_center_origin(camera: &Controller, viewport_min: [f32; 2], coord: Coord,
     [viewport_min[0] + center[0], viewport_min[1] + center[1]]
 }
 
-fn block_center_origin(camera: &Controller, viewport_min: [f32; 2], selection: Selection, tile_size: u32) -> [f32; 2] {
-    let tile_size = tile_size.max(1) as f32;
-    let center = camera.map_to_screen([
-        (selection.min.x.saturating_sub(1) as f32 + selection.width() as f32 * 0.5) * tile_size,
-        (selection.min.y.saturating_sub(1) as f32 + selection.height() as f32 * 0.5) * tile_size,
-    ]);
-
-    [viewport_min[0] + center[0], viewport_min[1] + center[1]]
-}
-
 fn dragged_block_selection(drag: BlockDragState, mouse: [f32; 2]) -> Selection {
     let scale = drag.zoom * drag.tile_size as f32;
 
@@ -833,9 +682,6 @@ fn dragged_block_selection(drag: BlockDragState, mouse: [f32; 2]) -> Selection {
         return selection;
     }
 
-    let move_x = if drag.handle.moves_x() { delta[0] } else { 0 };
-    let move_y = if drag.handle.moves_y() { delta[1] } else { 0 };
-
     let max_x = drag
         .map_size
         .x
@@ -851,10 +697,10 @@ fn dragged_block_selection(drag: BlockDragState, mouse: [f32; 2]) -> Selection {
 
     let min = Coord::new(
         i64::from(drag.start_selection.min.x)
-            .saturating_add(move_x)
+            .saturating_add(delta[0])
             .clamp(1, i64::from(max_x)) as u32,
         i64::from(drag.start_selection.min.y)
-            .saturating_add(move_y)
+            .saturating_add(delta[1])
             .clamp(1, i64::from(max_y)) as u32,
         drag.start_selection.min.z,
     );
@@ -862,22 +708,21 @@ fn dragged_block_selection(drag: BlockDragState, mouse: [f32; 2]) -> Selection {
     drag.start_selection.with_min(min).unwrap_or(drag.start_selection)
 }
 
-fn block_drag_action(
-    kind: BlockGizmoKind, shift: bool, gizmo: Option<Handle>, edge: Option<(i8, i8)>,
-) -> Option<(Handle, BlockDragAction)> {
-    if let Some((x, y)) = edge {
-        return Some((Handle::XY, BlockDragAction::Resize { x, y }));
+fn block_hit_at(
+    camera: &Controller, view: GizmoMapView, selection: Selection, tile_size: u32, mouse: [f32; 2], scale: f32,
+    copy: bool,
+) -> Option<BlockDragAction> {
+    if let Some((x, y)) = resize_handle_at(camera, view, selection, tile_size, mouse, scale) {
+        return Some(BlockDragAction::Resize { x, y });
     }
-    let handle = gizmo?;
-    let action = match (kind, shift) {
-        (BlockGizmoKind::Selection, true) => BlockDragAction::Resize {
-            x: i8::from(handle.moves_x()),
-            y: i8::from(handle.moves_y()),
-        },
-        (BlockGizmoKind::Placement, true) => return None,
-        _ => BlockDragAction::Move,
-    };
-    Some((handle, action))
+
+    let size = tile_size.max(1) as f32;
+    let lower = camera.map_to_screen([(selection.min.x - 1) as f32 * size, (selection.min.y - 1) as f32 * size]);
+    let upper = camera.map_to_screen([selection.max.x as f32 * size, selection.max.y as f32 * size]);
+    let min = [view.min[0] + lower[0], view.min[1] + upper[1]];
+    let max = [view.min[0] + upper[0], view.min[1] + lower[1]];
+
+    (contains(mouse, view.min, view.max) && contains(mouse, min, max)).then_some(BlockDragAction::Move { copy })
 }
 
 fn resize_cursor(x: i8, y: i8) -> MouseCursor {
@@ -1030,33 +875,6 @@ fn direction_set(
     set.slots = if set.directions().any(is_diagonal) { 8 } else { 4 };
 
     (set.len() > 1).then_some(set)
-}
-
-fn cardinal_direction_set() -> DirectionSet {
-    let mut supported = [false; 8];
-    for direction in [Dir::North, Dir::East, Dir::South, Dir::West] {
-        supported[clockwise_index(direction)] = true;
-    }
-
-    DirectionSet { supported, slots: 4 }
-}
-
-const fn rotation_direction(rotation: SelectionRotation) -> Dir {
-    match rotation {
-        SelectionRotation::Original => Dir::North,
-        SelectionRotation::Clockwise => Dir::East,
-        SelectionRotation::Half => Dir::South,
-        SelectionRotation::CounterClockwise => Dir::West,
-    }
-}
-
-const fn direction_rotation(direction: Dir) -> SelectionRotation {
-    match direction {
-        Dir::North | Dir::Northeast | Dir::Northwest => SelectionRotation::Original,
-        Dir::East | Dir::Southeast => SelectionRotation::Clockwise,
-        Dir::South | Dir::Southwest => SelectionRotation::Half,
-        Dir::West => SelectionRotation::CounterClockwise,
-    }
 }
 
 fn selected_direction_target(target: SelectedTransform) -> DirectionTarget {
@@ -1482,16 +1300,27 @@ mod tests {
         }
     }
 
-    fn block_drag(handle: Handle) -> BlockDragState {
+    fn block_drag() -> BlockDragState {
         BlockDragState {
             start_selection: Selection::from_drag(Coord::new(3, 2, 1), Coord::new(5, 4, 1)),
-            handle,
-            action: BlockDragAction::Move,
+            action: BlockDragAction::Move { copy: false },
             start_mouse: [100.0, 100.0],
             zoom: 2.0,
             tile_size: 32,
             map_size: Size { x: 6, y: 5, z: 1 },
         }
+    }
+
+    fn block_center_origin(
+        camera: &Controller, viewport_min: [f32; 2], selection: Selection, tile_size: u32,
+    ) -> [f32; 2] {
+        let tile_size = tile_size.max(1) as f32;
+        let center = camera.map_to_screen([
+            (selection.min.x.saturating_sub(1) as f32 + selection.width() as f32 * 0.5) * tile_size,
+            (selection.min.y.saturating_sub(1) as f32 + selection.height() as f32 * 0.5) * tile_size,
+        ]);
+
+        [viewport_min[0] + center[0], viewport_min[1] + center[1]]
     }
 
     fn selected() -> PrefabInstanceId {
@@ -1542,31 +1371,13 @@ mod tests {
     }
 
     #[test]
-    fn block_gizmo_origin_uses_the_center_of_the_whole_selection() {
-        let mut camera = Controller::new();
-        camera.resize(64, 64);
-        camera.camera.x = 32.0;
-        camera.camera.y = 32.0;
-        let selection = Selection::from_drag(Coord::new(2, 1, 1), Coord::new(4, 2, 1));
-
+    fn block_drag_moves_whole_tiles_and_clamps_to_the_map() {
         assert_eq!(
-            block_center_origin(&camera, [100.0, 200.0], selection, 32),
-            [180.0, 232.0]
-        );
-    }
-
-    #[test]
-    fn block_gizmo_moves_whole_tiles_along_its_active_axes_and_clamps_to_the_map() {
-        assert_eq!(
-            dragged_block_selection(block_drag(Handle::X), [164.0, 36.0]),
-            Selection::from_drag(Coord::new(4, 2, 1), Coord::new(6, 4, 1))
+            dragged_block_selection(block_drag(), [164.0, 36.0]),
+            Selection::from_drag(Coord::new(4, 3, 1), Coord::new(6, 5, 1))
         );
         assert_eq!(
-            dragged_block_selection(block_drag(Handle::Y), [164.0, 36.0]),
-            Selection::from_drag(Coord::new(3, 3, 1), Coord::new(5, 5, 1))
-        );
-        assert_eq!(
-            dragged_block_selection(block_drag(Handle::XY), [-1_000.0, 1_000.0]),
+            dragged_block_selection(block_drag(), [-1_000.0, 1_000.0]),
             Selection::from_drag(Coord::new(1, 1, 1), Coord::new(3, 3, 1))
         );
     }
@@ -1583,7 +1394,7 @@ mod tests {
             (0, -1, (3, 3), (5, 4)),
             (0, 1, (3, 2), (5, 5)),
         ] {
-            let mut drag = block_drag(Handle::XY);
+            let mut drag = block_drag();
             drag.action = BlockDragAction::Resize { x, y };
             assert_eq!(
                 dragged_block_selection(drag, [164.0, 36.0]),
@@ -1595,7 +1406,7 @@ mod tests {
 
     #[test]
     fn resize_clamps_at_one_tile_and_at_map_edges_without_flipping() {
-        let mut drag = block_drag(Handle::XY);
+        let mut drag = block_drag();
         drag.action = BlockDragAction::Resize { x: 1, y: 1 };
         assert_eq!(
             dragged_block_selection(drag, [-10_000.0, 10_000.0]),
@@ -1617,24 +1428,24 @@ mod tests {
     }
 
     #[test]
-    fn shift_gizmo_resizes_only_the_requested_axes_and_keeps_clipboard_movement() {
-        for (handle, x, y) in [(Handle::X, 1, 0), (Handle::Y, 0, 1), (Handle::XY, 1, 1)] {
-            assert_eq!(
-                block_drag_action(BlockGizmoKind::Selection, true, Some(handle), None),
-                Some((handle, BlockDragAction::Resize { x, y }))
-            );
-            assert_eq!(
-                block_drag_action(BlockGizmoKind::Selection, false, Some(handle), None),
-                Some((handle, BlockDragAction::Move))
-            );
-            assert_eq!(
-                block_drag_action(BlockGizmoKind::Clipboard, true, Some(handle), None),
-                Some((handle, BlockDragAction::Move))
-            );
-            assert_eq!(
-                block_drag_action(BlockGizmoKind::Placement, true, Some(handle), None),
-                None
-            );
+    fn the_selection_body_moves_and_its_edges_resize() {
+        let selection = Selection::from_drag(Coord::new(3, 3, 1), Coord::new(5, 4, 1));
+        let mut camera = Controller::new();
+        camera.resize(800, 600);
+        camera.center_on_tile(Coord::new(4, 3, 1), 32);
+        let view = GizmoMapView {
+            min: [0.0; 2],
+            max: [800.0, 600.0],
+            hovered: true,
+        };
+        let center = block_center_origin(&camera, view.min, selection, 32);
+        let hit = |point, copy| block_hit_at(&camera, view, selection, 32, point, 1.0, copy);
+
+        assert_eq!(hit(center, false), Some(BlockDragAction::Move { copy: false }));
+        assert_eq!(hit(center, true), Some(BlockDragAction::Move { copy: true }));
+        assert_eq!(hit([center[0] + 200.0, center[1]], false), None);
+        for (x, y, position) in resize_handle_positions(&camera, view.min, selection, 32, 1.0) {
+            assert_eq!(hit(position, false), Some(BlockDragAction::Resize { x, y }));
         }
     }
 
@@ -1660,18 +1471,6 @@ mod tests {
             let center = block_center_origin(&camera, view.min, selection, 32);
             assert_eq!(resize_handle_at(&camera, view, selection, 32, center, 1.0), None);
         }
-    }
-
-    #[test]
-    fn block_rotation_wheel_exposes_the_four_cardinal_orientations() {
-        assert_eq!(
-            cardinal_direction_set().directions().collect::<Vec<_>>(),
-            [Dir::North, Dir::East, Dir::South, Dir::West]
-        );
-        assert_eq!(direction_rotation(Dir::North), SelectionRotation::Original);
-        assert_eq!(direction_rotation(Dir::East), SelectionRotation::Clockwise);
-        assert_eq!(direction_rotation(Dir::South), SelectionRotation::Half);
-        assert_eq!(direction_rotation(Dir::West), SelectionRotation::CounterClockwise);
     }
 
     #[test]

@@ -9,6 +9,7 @@ use net::LevelChange;
 use crate::{
     document::{MapDocument, PlacedTile},
     grid::{Grid, LevelCells},
+    tool::SelectionMask,
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -23,6 +24,13 @@ pub struct TileChange {
 pub struct Resize {
     pub before: (u32, u32),
     pub after: (u32, u32),
+}
+
+/// Block selection on each side of an edit
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SelectionChange {
+    pub before: Option<SelectionMask>,
+    pub after: Option<SelectionMask>,
 }
 
 #[derive(Debug, Clone)]
@@ -66,6 +74,7 @@ pub struct Edit {
     record_empty: bool,
     resize: Option<Resize>,
     level: Option<LevelEdit>,
+    selection: Option<SelectionChange>,
 }
 
 impl Edit {
@@ -76,6 +85,7 @@ impl Edit {
             record_empty: false,
             resize: None,
             level: None,
+            selection: None,
         }
     }
 
@@ -94,6 +104,14 @@ impl Edit {
     }
 
     pub fn level(&self) -> Option<&LevelEdit> { self.level.as_ref() }
+
+    pub fn selecting(mut self, selection: SelectionChange) -> Self {
+        self.selection = Some(selection);
+
+        self
+    }
+
+    pub fn selection(&self) -> Option<SelectionChange> { self.selection }
 
     pub fn is_structural(&self) -> bool { self.resize.is_some() || self.level.is_some() }
 

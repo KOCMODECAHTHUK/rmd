@@ -122,7 +122,7 @@ pub(super) fn share_presence(session: &Session, frame: &ViewFrame<'_>, coop: &mu
         .selection()
         .filter(|_| shows_block_selection(session.tool()))
         .map(|source| {
-            let (selection, _) = frame.gestures.displayed(source);
+            let selection = frame.gestures.displayed(source);
             net::Selection {
                 map: map.clone(),
                 z: selection.min.z,

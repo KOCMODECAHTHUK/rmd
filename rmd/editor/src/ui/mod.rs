@@ -62,15 +62,10 @@ mod welcome;
 use self::{
     blame::{BlamePopup, blame_tooltip_position, draw_blame_popup},
     block::{
-        BlockPlacementAction,
         BlockSelectionOptions,
         PendingBlockPlacement,
-        PlacementControls,
         RectangleGesture,
-        block_controls_placement,
-        block_placement_controls_layout,
         draw_block_outline,
-        draw_block_placement_controls,
         draw_marching_edge,
         draw_selection_mode_controls,
         marching_stripe_offset,
@@ -121,7 +116,7 @@ use self::{
         draw_placement_preview,
         overlay_padding,
     },
-    paste::{PASTE_LABELS, PasteAction, PendingPaste, centered_paste_min, draw_paste_controls, paste_controls},
+    paste::centered_paste_min,
     search::{MAX_CUSTOM_FILL_SEARCH_RESULTS, draw_type_path_search},
     toolbar::{DEFAULT_CUSTOM_FILL_BOUNDARY, TopOverlayState, draw_top_overlay, request_level_change},
     tooltip::{draw_conflict_tooltip, draw_diff_tooltip},
@@ -1857,7 +1852,7 @@ mod tests {
             KeyBinding::new(dear_imgui_rs::Key::N)
         );
         // Every action is reachable from the settings list, or it cannot be rebound.
-        assert_eq!(KeybindAction::ALL.len(), 56);
+        assert_eq!(KeybindAction::ALL.len(), 57);
         assert_eq!(KeybindAction::RECENT.len(), 10);
         assert!(KeybindAction::ALL.contains(&KeybindAction::Save));
         assert!(KeybindAction::ALL.contains(&KeybindAction::Undo));

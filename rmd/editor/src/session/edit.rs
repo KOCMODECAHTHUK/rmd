@@ -2,9 +2,9 @@ use core::path::TreePath;
 
 use dmm::{Coord, Prefab};
 use editor::{
-    command::{Edit, EditGroupId},
+    command::{Edit, EditGroupId, SelectionChange},
     document::{PrefabInstanceId, VarMutation},
-    tool::{self, FillError, FillMode, MAX_FILL_TILES, Tool, ToolContext, ToolEdit},
+    tool::{self, FillError, FillMode, MAX_FILL_TILES, SelectionMask, Tool, ToolContext, ToolEdit},
 };
 use objtree::ObjectTree;
 
@@ -316,6 +316,25 @@ impl Session {
             fill_mode: FillMode::default(),
             custom_fill_boundaries: &[],
         })
+    }
+
+    /// Commits a block edit that leaves `after` selected, undo puts the old selection back
+    pub(super) fn commit_selecting(&mut self, mut action: ToolEdit, after: SelectionMask) -> bool {
+        action.edit = action.edit.selecting(SelectionChange {
+            before: self.selection_mask(),
+            after: Some(after),
+        });
+
+        if !self.commit(action, None) {
+            return false;
+        }
+
+        if let Some(document) = self.state.active_document_mut() {
+            document.set_selection(Some(after.bounds), after.mode);
+            document.select_instance(None);
+        }
+
+        true
     }
 
     pub(super) fn commit(&mut self, action: ToolEdit, group: Option<EditGroupId>) -> bool {

@@ -23,6 +23,7 @@ use crate::{
         ICON_FORMAT_COLOR_FILL,
         ICON_PENCIL,
         ICON_SELECT_DRAG,
+        ICON_TEXTURE,
         ICON_VECTOR_POLYLINE,
     },
     visual,
@@ -40,6 +41,7 @@ pub enum Tool {
     Delete,
     Replace,
     Fill,
+    RectFill,
     Comment,
 }
 
@@ -188,6 +190,7 @@ impl Tool {
             Tool::Delete => "Delete",
             Tool::Replace => "Replace",
             Tool::Fill => "Fill",
+            Tool::RectFill => "Rectangle Fill",
             Tool::Comment => "Comment",
         }
     }
@@ -201,6 +204,7 @@ impl Tool {
             Tool::Delete => ICON_ERASER,
             Tool::Replace => ICON_FIND_REPLACE,
             Tool::Fill => ICON_FORMAT_COLOR_FILL,
+            Tool::RectFill => ICON_TEXTURE,
             Tool::Comment => ICON_COMMENT_TEXT_OUTLINE,
         }
     }
@@ -209,7 +213,7 @@ impl Tool {
         match self {
             Self::Place => place(context),
             Self::Delete => delete(context),
-            Self::Select | Self::Node | Self::BlockSelect | Self::Replace | Self::Comment => None,
+            Self::Select | Self::Node | Self::BlockSelect | Self::Replace | Self::RectFill | Self::Comment => None,
             Self::Fill => fill(context, Some(MAX_FILL_TILES), None).ok().flatten(),
         }
     }
@@ -240,7 +244,7 @@ impl From<Tool> for net::Tool {
             Tool::BlockSelect => Self::BlockSelect,
             Tool::Delete => Self::Delete,
             Tool::Replace => Self::Replace,
-            Tool::Fill => Self::Fill,
+            Tool::Fill | Tool::RectFill => Self::Fill,
             Tool::Comment => Self::Comment,
         }
     }
