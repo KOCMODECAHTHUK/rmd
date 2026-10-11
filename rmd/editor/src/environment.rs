@@ -9,7 +9,15 @@ use codegen::CodegenError;
 use dmi::error::IconError;
 use net::CodebaseHash;
 use objtree::TypeId;
-use preprocessor::{PreludeFile, Preprocessor, SourceCache, Spanned, error::PreprocessError, prelude_files};
+use preprocessor::{
+    PreludeFile,
+    Preprocessor,
+    SourceCache,
+    Spanned,
+    error::PreprocessError,
+    macros_used_before_definition,
+    prelude_files,
+};
 use sema::error::SemaError;
 
 use crate::{
@@ -495,7 +503,6 @@ fn compile_view<'a>(
         tokens
     };
 
-    drop(preprocessed.defines);
     if progress.is_cancelled() {
         return Err(LoadError::Cancelled);
     }
@@ -531,6 +538,24 @@ fn compile_view<'a>(
         .map(Path::to_path_buf)
         .unwrap_or_else(|| entry.to_path_buf());
 
+    let mut errors = preprocessed.errors;
+    if let Some(module) = &module {
+        let uses = module.procs.iter().flat_map(|procedure| {
+            module
+                .named_variables(procedure)
+                .map(|name| (name.as_str(), procedure.location))
+        });
+        let source_root = root.parent().unwrap_or(&root);
+        errors.extend(macros_used_before_definition(
+            &preprocessed.defines,
+            &preprocessed.sources,
+            source_root,
+            uses,
+        ));
+    }
+
+    drop(preprocessed.defines);
+
     let maps = preprocessed
         .resources
         .iter()
@@ -546,7 +571,7 @@ fn compile_view<'a>(
         maps,
         builtin_files: preprocessed.builtin_files,
         resource_dirs: preprocessed.resource_dirs,
-        errors: preprocessed.errors,
+        errors,
         sema_errors,
         optimization_timings,
         source_cache: preprocessed.source_cache,

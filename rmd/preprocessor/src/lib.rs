@@ -1710,6 +1710,40 @@ pub fn render(tokens: &[Spanned<'_>]) -> String {
     out.lines().map(str::trim_end).collect::<Vec<_>>().join("\n")
 }
 
+pub fn macros_used_before_definition<'n>(
+    defines: &DefineTable<'_>, sources: &SourceMap<'_>, root: &Path,
+    uses: impl IntoIterator<Item = (&'n str, Location)>,
+) -> Vec<PreprocessError> {
+    let mut reported = HashSet::new();
+    let mut errors = Vec::new();
+    for (name, location) in uses {
+        let Some(define) = defines.get(name) else {
+            continue;
+        };
+
+        let is_self_reference =
+            matches!(define.body.as_slice(), [BodyPart::Token(Token::Identifier(body))] if *body == name);
+        if define.builtin.is_some() || define.is_function_like() || is_self_reference || !reported.insert(name) {
+            continue;
+        }
+
+        let path = sources
+            .path(define.location.file)
+            .map(|path| path.strip_prefix(root).unwrap_or(path));
+        errors.push(PreprocessError::new(
+            Code::ItemDoesntExist,
+            Code::ItemDoesntExist.default_level(),
+            location,
+            format!(
+                "'{name}' is used before its #define at {}, macros only apply after they are defined",
+                define.location.display(path)
+            ),
+        ));
+    }
+
+    errors
+}
+
 #[cfg(test)]
 mod tests {
     macro_rules! fixture {
@@ -1939,6 +1973,39 @@ mod tests {
 
         assert!(render(&second.tokens).contains("x = 1"));
         assert!(!render(&second.tokens).contains("x = 2"));
+    }
+
+    #[test]
+    fn a_macro_defined_after_its_use_is_reported_at_the_use() {
+        static NEXT: AtomicUsize = AtomicUsize::new(0);
+
+        let id = NEXT.fetch_add(1, Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!("rmd-macro-order-{}-{id}", std::process::id()));
+        fs::create_dir_all(&dir).expect("temp dir");
+        let entry = dir.join("entry.dm");
+        fs::write(&entry, fixture!("programs/macro-used-before-define.dm")).expect("write entry");
+
+        let arena = StrArena::new();
+        let result = Preprocessor::new(&arena)
+            .without_core()
+            .without_prelude()
+            .run(&entry)
+            .expect("preprocess");
+        let uses = result.tokens.iter().filter_map(|(token, location)| match token {
+            Token::Identifier(name) => Some((*name, *location)),
+            _ => None,
+        });
+        let errors = macros_used_before_definition(&result.defines, &result.sources, &dir, uses);
+        fs::remove_dir_all(&dir).expect("remove temp dir");
+
+        let errors = errors.iter().map(ToString::to_string).collect::<Vec<_>>();
+        assert_eq!(
+            errors,
+            [
+                "error DR0404 at 2:9: 'LATER' is used before its #define at entry.dm:4:1, macros only apply after \
+                 they are defined"
+            ]
+        );
     }
 
     #[test]

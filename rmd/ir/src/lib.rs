@@ -521,4 +521,15 @@ impl Module {
             _ => None,
         }
     }
+
+    /// Names a procedure left for the runtime to resolve, declared in its entry block
+    pub fn named_variables<'m>(&'m self, procedure: &Procedure) -> impl Iterator<Item = &'m Identifier> {
+        self.block(procedure.body)
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|id| match self.node(*id) {
+                Some(IrNode::Variable(name)) => Some(name),
+                _ => None,
+            })
+    }
 }

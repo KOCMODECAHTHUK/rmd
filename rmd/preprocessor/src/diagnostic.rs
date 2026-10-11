@@ -8,6 +8,7 @@ use std::collections::HashMap;
 pub enum Code {
     BadToken = 1,
     BadDirective = 10,
+    ItemDoesntExist = 404,
     InvalidInclusion = 900,
 
     FileAlreadyIncluded = 1000,
@@ -31,6 +32,7 @@ impl Code {
         Some(match name {
             "BadToken" => Self::BadToken,
             "BadDirective" => Self::BadDirective,
+            "ItemDoesntExist" => Self::ItemDoesntExist,
             "InvalidInclusion" => Self::InvalidInclusion,
             "FileAlreadyIncluded" => Self::FileAlreadyIncluded,
             "MissingIncludedFile" => Self::MissingIncludedFile,
@@ -51,6 +53,7 @@ impl Code {
         const ALL: &[Code] = &[
             Code::BadToken,
             Code::BadDirective,
+            Code::ItemDoesntExist,
             Code::InvalidInclusion,
             Code::FileAlreadyIncluded,
             Code::MissingIncludedFile,
@@ -70,7 +73,7 @@ impl Code {
 
     pub fn default_level(self) -> Level {
         match self {
-            Self::BadToken | Self::BadDirective | Self::InvalidInclusion => Level::Error,
+            Self::BadToken | Self::BadDirective | Self::ItemDoesntExist | Self::InvalidInclusion => Level::Error,
             Self::MissingIncludedFile | Self::MisplacedDirective | Self::ErrorDirective => Level::Error,
             Self::FileAlreadyIncluded
             | Self::InvalidWarningCode

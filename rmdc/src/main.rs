@@ -309,6 +309,20 @@ fn bake_map(entry: &Path, map_path: &Path, summary: bool, check_edit: bool) -> R
     })?;
     let (tree, errors) = sema::analyze(&ast);
     let (ir_module, _) = ir::lower(&ast, &tree, true);
+    let uses = ir_module.procs.iter().flat_map(|procedure| {
+        ir_module
+            .named_variables(procedure)
+            .map(|name| (name.as_str(), procedure.location))
+    });
+    for error in
+        preprocessor::macros_used_before_definition(&preprocessed.defines, &preprocessed.sources, source_root, uses)
+    {
+        eprintln!(
+            "{}",
+            error.display(relative_path(&preprocessed.sources, source_root, error.location.file))
+        );
+    }
+
     for error in &errors {
         eprintln!(
             "{}",

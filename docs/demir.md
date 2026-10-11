@@ -136,6 +136,21 @@ compile the profile:
 #endif
 ```
 
+Include the profile after the generated include block. Dream Maker sorts and rewrites that block,
+but it keeps lines that follow `// END_INCLUDE`:
+
+```dm
+// END_INCLUDE
+#ifdef __DEMIR_BAKE__
+#include "code\demir.dm"
+#endif
+```
+
+The profile must come after the codebase. A macro applies only after its `#define`, and a later
+proc or var definition on a type replaces an earlier one. A profile included earlier cannot use
+the codebase's macros, and the codebase's own procs replace the profile's overrides. The compiler
+reports a macro used before its definition as `DR0404`.
+
 The profile instance is the `src` value for each hook. Store persistent profile settings in its
 variables. Use `New()` for setup and call the parent implementation when the profile inherits from
 another profile. Ordinary procedures can get the active profile through `demir_profile()`.

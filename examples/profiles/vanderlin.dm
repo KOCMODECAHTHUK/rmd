@@ -1,6 +1,6 @@
-// rmd embeds this integration for the Forced bundled profile setting. To make the profile part of
-// a Vanderlin checkout instead, copy it there and `#include` it from `vanderlin.dme`, the guard
-// keeps BYOND compiling it to nothing.
+// rmd embeds this integration for the Forced bundled profile setting. To make the profile part of a
+// Vanderlin checkout instead, copy it there and `#include` it from `vanderlin.dme` after
+// `// END_INCLUDE`, the guard keeps BYOND compiling it to nothing.
 //
 // Vanderlin needs its globals and overlay subsystem stubbed before anything smooths, and its fluid
 // pipes assemble an icon state from a connection list that normally fills in over two init passes.
