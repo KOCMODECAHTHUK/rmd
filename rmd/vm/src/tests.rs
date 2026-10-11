@@ -2510,6 +2510,23 @@ fn initial_reads_the_builtin_type_vars() {
 }
 
 #[test]
+fn a_scope_read_of_an_undeclared_var_faults() {
+    let (tree, module) = compile(fixture!("programs/a_scope_read_of_an_undeclared_var_faults.dm"));
+    let fault = Runtime::default()
+        .run(
+            &tree,
+            &module,
+            proc(&tree, &module.index, "test"),
+            None,
+            None,
+            Vec::new(),
+            Limits::default(),
+        )
+        .expect_err("the path's type has no such var");
+    assert_eq!(fault.kind, FaultKind::MissingVariable("only_child".into()));
+}
+
+#[test]
 fn a_var_and_a_proc_can_share_a_name() {
     let result = run(fixture!("programs/a_var_and_a_proc_can_share_a_name.dm"), "test");
 

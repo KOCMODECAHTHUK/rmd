@@ -1671,11 +1671,13 @@ impl Evaluator<'_> {
                     return self.call(initializer, Some(dummy), Vec::new());
                 }
 
-                let Some(variable) = self.tree.var_inherited(ty, name) else {
-                    return Ok(GenericValue::Null);
-                };
+                let value = self
+                    .tree
+                    .var_inherited(ty, name)
+                    .map(|variable| variable.value.clone())
+                    .ok_or_else(|| self.fault(FaultKind::MissingVariable(key.into())))?;
 
-                self.constant(&variable.value.clone())
+                self.constant(&value)
             },
             GenericValue::Object(id) => {
                 if matches!(key, vars::OVERLAYS | vars::UNDERLAYS) {
