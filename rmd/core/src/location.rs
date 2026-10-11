@@ -63,3 +63,88 @@ impl std::fmt::Display for LocationDisplay<'_> {
         }
     }
 }
+
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct SourceLine {
+    pub file: FileId,
+    pub line: u32,
+}
+
+impl SourceLine {
+    pub fn of(location: Location) -> Self {
+        Self {
+            file: location.file,
+            line: location.begin.line,
+        }
+    }
+
+    pub fn location(self) -> Location {
+        Location::in_file(
+            self.file,
+            Position {
+                line: self.line,
+                col: 1,
+            },
+            Position {
+                line: self.line,
+                col: 1,
+            },
+        )
+    }
+}
+
+/// Lines keyed by ascending ids or offsets, stored only where the line changes
+#[derive(Debug, Clone)]
+pub struct LineTable<K> {
+    runs: Vec<(K, Option<SourceLine>)>,
+}
+
+impl<K> Default for LineTable<K> {
+    fn default() -> Self { Self { runs: Vec::new() } }
+}
+
+impl<K: Copy + Ord> LineTable<K> {
+    pub fn push(&mut self, key: K, line: Option<SourceLine>) {
+        if self.runs.last().is_some_and(|(_, last)| *last == line) {
+            return;
+        }
+
+        if self.runs.last().is_some_and(|(last, _)| *last == key) {
+            self.runs.pop();
+            if self.runs.last().is_some_and(|(_, last)| *last == line) {
+                return;
+            }
+        }
+
+        self.runs.push((key, line));
+    }
+
+    pub fn get(&self, key: K) -> Option<SourceLine> {
+        let index = self.runs.partition_point(|(start, _)| *start <= key);
+
+        self.runs.get(index.checked_sub(1)?)?.1
+    }
+
+    pub fn get_near(&self, key: K, hint: &mut usize) -> Option<SourceLine> {
+        const HINT_LOOKUP_DEPTH: usize = 3;
+
+        let covers = |index: usize| {
+            self.runs.get(index).is_some_and(|(start, _)| *start <= key)
+                && self.runs.get(index + 1).is_none_or(|(next, _)| key < *next)
+        };
+
+        match (*hint..*hint + HINT_LOOKUP_DEPTH).find(|index| covers(*index)) {
+            Some(index) => *hint = index,
+            None => {
+                let index = self.runs.partition_point(|(start, _)| *start <= key);
+                *hint = index.checked_sub(1)?;
+            },
+        }
+
+        self.runs.get(*hint)?.1
+    }
+
+    pub fn len(&self) -> usize { self.runs.len() }
+
+    pub fn is_empty(&self) -> bool { self.runs.is_empty() }
+}

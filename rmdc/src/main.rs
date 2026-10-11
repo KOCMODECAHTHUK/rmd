@@ -493,22 +493,10 @@ fn bake_map(entry: &Path, map_path: &Path, summary: bool, check_edit: bool) -> R
         .iter()
         .filter(|diagnostic| diagnostic.count > 0)
     {
-        let fault = &diagnostic.fault;
-        let name = fault
-            .proc
-            .and_then(|proc| module.function_for_proc(proc))
-            .and_then(|function| module.strings.get(function.name.0 as usize))
-            .map(String::as_str)
-            .unwrap_or_default();
-        eprintln!(
-            "{}x {name} {:?} at {}",
-            diagnostic.count,
-            fault.kind,
-            fault.location.display(preprocessed.sources.path(fault.location.file))
-        );
-        if let Some(offset) = fault.offset {
-            eprintln!("  bytecode {offset}");
-        }
+        let report = diagnostic
+            .fault
+            .format_fault_report(&module, |file| relative_path(&preprocessed.sources, source_root, file));
+        eprintln!("{}x {report}", diagnostic.count);
     }
 
     if let Some(atom) = edit_atom {
@@ -561,6 +549,7 @@ fn icon_states(tree: &ObjectTree, module: &codegen::Module, roots: &[PathBuf]) -
         Some((
             name.to_owned(),
             metadata.states.into_iter().map(|state| state.name).collect(),
+            [metadata.width, metadata.height],
         ))
     }))
 }
@@ -647,11 +636,8 @@ fn evaluate_file_with(path: &Path, selection: EntrySelection) -> Result<Vec<Stri
         )
     };
     result.map_err(|fault| {
-        std::io::Error::other(format!(
-            "runtime fault at {}: {:?}",
-            format_location(&preprocessed.sources, source_root, fault.location),
-            fault.kind
-        ))
+        let report = fault.format_fault_report(&module, |file| relative_path(&preprocessed.sources, source_root, file));
+        std::io::Error::other(format!("runtime fault: {report}"))
     })?;
 
     Ok(runtime.take_output())

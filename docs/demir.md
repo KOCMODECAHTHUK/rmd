@@ -281,8 +281,9 @@ A UI frame allows 4,096 commands and 16 nested windows or nodes. Labels can cont
 Text values can contain 1,024 characters. One atom can declare 16 highlights. One highlight can
 contain 16,384 tiles and a 64-character label.
 
-The VM blocks file access, native libraries, networking, sleep, spawned work, timers, and
-interactive input. DM `catch` can handle DM throws. It cannot consume sandbox or resource faults.
+The VM blocks file access, native libraries, networking, sleep, timers, and interactive input. A
+bake is a snapshot taken before deferred work runs, so a `spawn` evaluates its delay and skips its
+body. `catch` can handle DM throws. It cannot consume sandbox or resource faults.
 
 Random values use a seed based on the target atom's type and coordinates. Repeating a bake for the
 same atom gives the same random sequence. World time and tick usage are deterministic.
@@ -290,8 +291,19 @@ same atom gives the same random sequence. World time and tick usage are determin
 Profiles can write diagnostic text with `world.log << value`. The compiler driver and viewer write
 each line to standard error with a `DM:` prefix. The editor sends the line to its normal log.
 
-Faults include the procedure, source location, and kind. The editor groups repeated faults. A failed
-appearance preview exports no changes. A failed `New()` call stops the remaining bake stages.
+A fault reports its kind, the line that raised it, and the call stack back to the hook:
+
+```text
+invalid reference in /obj/item/box::update_icon at code/obj/item/box.dm:532:1
+  at /obj/item/box::update_icon (code/obj/item/box.dm:532:1)
+  at /atom::UpdateIcon (code/atom.dm:439:1)
+  at /datum/demir/example::bake (code/demir.dm:253:1)
+```
+
+The editor writes each new fault to its log once, and **Window > Runtimes** lists the faults in
+each map's bake, grouped by hook. A `ui()` fault stays listed until a later frame succeeds. Repeated
+faults at the same line count as one entry. A failed appearance preview exports no changes. A failed
+`New()` call stops the remaining bake stages.
 
 ## Development
 

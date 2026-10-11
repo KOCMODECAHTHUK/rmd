@@ -1,4 +1,8 @@
-use std::{collections::HashMap, path::PathBuf, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    path::PathBuf,
+    sync::Arc,
+};
 
 use dmm::Prefab;
 use editor::{
@@ -37,17 +41,8 @@ mod panel;
 mod preview;
 mod search;
 
-use self::{
-    bake::report_bake_output,
-    diff::DiffState,
-    direction::direction_state,
-    edit::is_reorder_label,
-    highlight::always_highlighted,
-    level::MAX_MAP_DIMENSION,
-    node::NodeEditState,
-    preview::BlockPreviewCache,
-};
 pub(crate) use self::{
+    bake::RuntimeFault,
     blame::{BlameState, blame_color},
     codebase::{DiagnosticSeverity, LoadReport, MAX_REPORTED_DIAGNOSTICS, build_textures, discover_maps},
     coop::{Activity, Coop, CoopStatus, SharedState},
@@ -62,6 +57,16 @@ pub(crate) use self::{
     node::NodeOverlay,
     palette::{PrefabThumbnail, prefab_thumbnail_for, prefab_thumbnail_or_missing},
     preview::{BlockPreviewSource, PlacementPreview},
+};
+use self::{
+    bake::report_bake_output,
+    diff::DiffState,
+    direction::direction_state,
+    edit::is_reorder_label,
+    highlight::always_highlighted,
+    level::MAX_MAP_DIMENSION,
+    node::NodeEditState,
+    preview::BlockPreviewCache,
 };
 
 #[derive(Default)]
@@ -105,7 +110,8 @@ pub struct Session {
     queued_bakes: Vec<DocumentId>,
     standalone_baker: editor::bake::Standalone,
     standalone: Vec<(Prefab, Option<visual::Appearance>)>,
-    ui_fault: Option<vm::FaultKind>,
+    logged_faults: HashSet<vm::FaultKey>,
+    logged_ui_fault: Option<vm::FaultKey>,
     /// The last interaction the panel committed, replayed into a bake that lands after it.
     ui_feedback: Option<editor::bake::UiFeedback>,
     node_edit: Option<NodeEditState>,
@@ -149,7 +155,8 @@ impl Session {
             queued_bakes: Vec::new(),
             standalone_baker: editor::bake::Standalone::default(),
             standalone: Vec::new(),
-            ui_fault: None,
+            logged_faults: HashSet::new(),
+            logged_ui_fault: None,
             ui_feedback: None,
             node_edit: None,
             identical: None,

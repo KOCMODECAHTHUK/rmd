@@ -5,7 +5,7 @@ mod reachability;
 mod stackify;
 
 use core::{
-    location::Location,
+    location::{LineTable, Location, SourceLine},
     path::TreePath,
     types::{Identifier, IrNodeId, ProcId, Value},
 };
@@ -55,7 +55,7 @@ id_type!(ConstantId, "const");
 id_type!(StringId, "str");
 id_type!(PathId, "path");
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct CodeOffset(pub u32);
 
 impl CodeOffset {
@@ -91,6 +91,7 @@ pub struct Module {
     pub paths: Vec<TreePath>,
     pub functions: Vec<CompiledFunction>,
     pub code: Vec<u8>,
+    pub lines: LineTable<CodeOffset>,
     proc_functions: Vec<FunctionId>,
     pub index: ProcIndex,
 }
@@ -100,6 +101,8 @@ impl Module {
     pub const VERSION: u16 = 2;
 
     pub fn function(&self, id: FunctionId) -> Option<&CompiledFunction> { self.functions.get(id.0 as usize) }
+
+    pub fn line_at(&self, offset: CodeOffset) -> Option<SourceLine> { self.lines.get(offset) }
 
     pub fn function_for_proc(&self, proc: ProcId) -> Option<&CompiledFunction> {
         let id = self.proc_functions.get(proc.0 as usize).copied()?;
@@ -246,6 +249,10 @@ struct Generator {
     jumps: Vec<JumpPatch>,
     next_label: usize,
     code: Vec<u8>,
+    lines: LineTable<CodeOffset>,
+    /// usize is compiled codegen offset here (like jump offsets)
+    function_lines: Vec<(usize, Option<SourceLine>)>,
+    line_hint: usize,
     /// `a.b()` looks `b` up as a proc first, and plain `a.b` as a var first
     callees: FxHashSet<IrNodeId>,
 }
@@ -266,6 +273,9 @@ impl Generator {
             jumps: Vec::new(),
             next_label: 0,
             code: Vec::new(),
+            lines: LineTable::default(),
+            function_lines: Vec::new(),
+            line_hint: 0,
             callees: FxHashSet::default(),
         }
     }
@@ -307,6 +317,7 @@ impl Generator {
             proc_functions: Module::index_procs(&self.functions),
             functions: self.functions,
             code: self.code,
+            lines: self.lines,
             index: module.index.clone(),
         })
     }
@@ -489,6 +500,8 @@ impl Generator {
                 continue;
             }
 
+            let line = module.node_lines.get_near(*instruction, &mut self.line_hint);
+            self.function_lines.push((self.code.len(), line));
             match module
                 .node(*instruction)
                 .ok_or(CodegenError::MissingNode(*instruction))?
@@ -1124,6 +1137,29 @@ impl Generator {
         }
         self.code.extend_from_slice(&old[cursor - start..]);
 
+        // keep track of removed jumps, they are used for function line tracking
+        let removed_jumps = self
+            .jumps
+            .iter()
+            .zip(&removed)
+            .filter_map(|(jump, removed)| removed.then_some(jump.instruction))
+            .collect::<Vec<_>>();
+        let mut skipped = 0;
+        for (offset, line) in std::mem::take(&mut self.function_lines) {
+            while removed_jumps
+                .get(skipped)
+                .is_some_and(|instruction| *instruction < offset)
+            {
+                skipped += 1;
+            }
+
+            let offset = u32::try_from(offset - skipped * 5).map_err(|_| CodegenError::CodeTooLarge)?;
+            self.lines.push(CodeOffset(offset), line);
+        }
+
+        let end = u32::try_from(self.code.len()).map_err(|_| CodegenError::CodeTooLarge)?;
+        self.lines.push(CodeOffset(end), None);
+
         let labels = std::mem::take(&mut self.labels)
             .into_iter()
             .map(|(label, offset)| (label, compact_offset(offset, &self.jumps, &removed)))
@@ -1139,6 +1175,7 @@ impl Generator {
             if removed_addresses.contains(&index) {
                 continue;
             }
+
             let operand = compact_offset(address.operand, &self.jumps, &removed);
             let target = label_offset(&labels, address.target)?;
             self.write_address(operand, target)?;
@@ -1819,6 +1856,18 @@ mod tests {
     }
 
     #[test]
+    fn lines_survive_jump_compaction() {
+        let module = generate(&lower(fixture!("programs/lines_survive_jump_compaction.dm"))).expect("generate");
+        let function = &module.functions[0];
+        let lines = (function.address.0..function.address.0 + function.length)
+            .filter_map(|offset| module.line_at(CodeOffset(offset)))
+            .map(|line| line.line)
+            .collect::<std::collections::BTreeSet<_>>();
+
+        assert_eq!(lines.into_iter().collect::<Vec<_>>(), [2, 3, 5, 6]);
+    }
+
+    #[test]
     fn unsupported_source_constructs_become_traps() {
         let module = generate(&lower(fixture!(
             "programs/unsupported_source_constructs_become_traps.dm"
@@ -1901,6 +1950,7 @@ mod tests {
                 location: Location::default(),
             }],
             index: ir::ProcIndex::default(),
+            node_lines: Default::default(),
         };
         let module = generate(&module).expect("generate");
         let output = disasm::dump(&module).expect("disassemble");

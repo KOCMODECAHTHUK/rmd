@@ -162,6 +162,12 @@ impl ProfileDefinition {
 
     pub fn procedure(&self, hook: ProfileHook) -> Option<ProcId> { self.procedures[hook as usize] }
 
+    pub fn hook_of(&self, proc: ProcId) -> Option<ProfileHook> {
+        ProfileHook::ALL
+            .into_iter()
+            .find(|hook| self.procedure(*hook) == Some(proc))
+    }
+
     pub fn declaration<'tree>(&self, tree: &'tree ObjectTree, hook: ProfileHook) -> Option<&'tree ProcDecl> {
         tree.proc_inherited(self.ty, &Identifier::from(hook.name()))
     }

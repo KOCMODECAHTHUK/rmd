@@ -2537,6 +2537,7 @@ fn icon_states_answer_from_the_host_table() {
     runtime.icons = IconStates::new([(
         String::from("icons/walls.dmi"),
         vec![String::from("wall0"), String::from("wall1"), String::from("wall0")],
+        [32, 32],
     )]);
     let result = runtime
         .run(
@@ -2869,6 +2870,73 @@ fn call_depth_stops_recursive_functions() {
         )
         .expect_err("call depth should stop recursion");
     assert_eq!(fault.kind, FaultKind::CallDepth);
+    assert_eq!(fault.frames.len(), 4);
+    assert!(
+        fault.frames.iter().all(|frame| frame.location.begin.line == 2),
+        "{fault:?}"
+    );
+}
+
+#[test]
+fn a_bake_fault_reports_each_frame_line() {
+    let (tree, module) = compile(fixture!("programs/a_bake_fault_reports_each_frame_line.dm"));
+    let atom = Atom {
+        instance: 1,
+        ty: tree.id_of(&TreePath::parse("/turf/floor")).expect("floor should exist"),
+        position: Position::new(1, 1, 1),
+        vars: Vec::new(),
+    };
+    let bake = Bake::new(
+        &tree,
+        &module,
+        vec![atom],
+        [1, 1, 1],
+        Limits::default(),
+        IconStates::default(),
+    );
+
+    assert_eq!(bake.diagnostics.count(), 1);
+    let fault = &bake.diagnostics.entries[0].fault;
+    let frames = fault
+        .frames
+        .iter()
+        .map(|frame| (crate::proc_name(&module, frame.proc), frame.location.begin.line))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        frames,
+        [("/datum/demir/test::reboot_from", 10), ("/datum/demir/test::bake", 6)]
+    );
+    assert_eq!(fault.location.begin.line, 10);
+    assert_eq!(bake.hook_of(fault), Some(ProfileHook::Bake));
+}
+
+#[test]
+fn a_ui_fault_stays_until_a_frame_succeeds() {
+    let (tree, module) = compile(fixture!("programs/a_ui_fault_stays_until_a_frame_succeeds.dm"));
+    let atom = Atom {
+        instance: 1,
+        ty: tree.id_of(&TreePath::parse("/turf/floor")).expect("floor should exist"),
+        position: Position::new(1, 1, 1),
+        vars: Vec::new(),
+    };
+    let mut bake = Bake::new(
+        &tree,
+        &module,
+        vec![atom],
+        [1, 1, 1],
+        Limits::default(),
+        IconStates::default(),
+    );
+
+    bake.ui(&tree, &module, Some(1), 0, Feedback::default())
+        .expect_err("ui() reboots with a target");
+    let fault = bake.ui_fault.as_ref().expect("the failed frame is kept");
+    assert_eq!(fault.location.begin.line, 5);
+    assert_eq!(bake.hook_of(fault), Some(ProfileHook::Ui));
+
+    bake.ui(&tree, &module, None, 0, Feedback::default())
+        .expect("ui() draws nothing without a target");
+    assert!(bake.ui_fault.is_none());
 }
 
 #[test]

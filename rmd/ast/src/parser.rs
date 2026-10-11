@@ -1,5 +1,5 @@
 use core::{
-    location::Location,
+    location::{LineTable, Location, SourceLine},
     path::{PathFlags, TreePath},
     types::{Identifier, VarModifiers},
 };
@@ -81,6 +81,9 @@ pub struct Parser<'a, 't> {
     tokens: &'t [(Token<'a>, Location)],
     cursor: usize,
     expressions: Vec<Expression>,
+    expression_lines: LineTable<ExpressionId>,
+    expression_start: Option<SourceLine>,
+    expression_cursor: usize,
     /// `a ? b:c : d`
     ternary_true_depth: usize,
 }
@@ -91,6 +94,9 @@ impl<'a, 't> Parser<'a, 't> {
             tokens,
             cursor: 0,
             expressions: Vec::new(),
+            expression_lines: LineTable::default(),
+            expression_start: None,
+            expression_cursor: usize::MAX,
             ternary_true_depth: 0,
         }
     }
@@ -102,6 +108,12 @@ impl<'a, 't> Parser<'a, 't> {
         };
 
         self.expressions.push(expr);
+        let line = self.expression_start.or_else(|| {
+            let (_, location) = self.tokens.get(self.cursor.checked_sub(1)?)?;
+
+            Some(SourceLine::of(*location))
+        });
+        self.expression_lines.push(expr_id, line);
 
         expr_id
     }
@@ -121,7 +133,10 @@ impl<'a, 't> Parser<'a, 't> {
             return Err(ParseError::expression_limit(location));
         }
 
-        Ok(AST::new(declarations, std::mem::take(&mut self.expressions)))
+        let mut ast = AST::new(declarations, std::mem::take(&mut self.expressions));
+        ast.expression_lines = std::mem::take(&mut self.expression_lines);
+
+        Ok(ast)
     }
 
     fn peek(&self) -> Option<(Token<'a>, Location)> { self.tokens.get(self.cursor).copied() }
@@ -1550,6 +1565,25 @@ impl<'a, 't> Parser<'a, 't> {
     }
 
     fn parse_expression(&mut self, precedence: Precedence) -> ParseResult<ExpressionId> {
+        // special case, probably not 1:1 with BYOND:tm: but operands below ternary precedence report the line their
+        // whole expression starts on
+        if precedence <= Precedence::Ternary
+            && self.expression_cursor != self.cursor
+            && let Some((_, location)) = self.peek()
+        {
+            let outer = (self.expression_start, self.expression_cursor);
+            self.expression_start = Some(SourceLine::of(location));
+            self.expression_cursor = self.cursor;
+            let expression = self.parse_expression_at(precedence);
+            (self.expression_start, self.expression_cursor) = outer;
+
+            return expression;
+        }
+
+        self.parse_expression_at(precedence)
+    }
+
+    fn parse_expression_at(&mut self, precedence: Precedence) -> ParseResult<ExpressionId> {
         match precedence {
             Precedence::Lowest => self.parse_expression(Precedence::In),
             Precedence::In => self.parse_in_expression(),
@@ -1938,6 +1972,11 @@ impl<'a, 't> Parser<'a, 't> {
                 Some(self.make_expr(Expression::Builtin(Builtin::ThisProc)))
             },
             Some(Token::Scope) => Some(self.parse_primary_expression()?),
+            // `new src.type()`
+            Some(Token::Soft(keyword)) if let Some(builtin) = soft_builtin(keyword) => {
+                self.advance()?;
+                Some(self.make_expr(Expression::Builtin(builtin)))
+            },
             Some(token) if token.is_identifier() => {
                 self.advance()?;
                 Some(self.make_expr(Expression::Identifier(Identifier::from(

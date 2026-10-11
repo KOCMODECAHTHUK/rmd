@@ -1,4 +1,5 @@
 use core::{
+    location::SourceLine,
     path::{PathFlags, TreePath},
     types::{Identifier, ProcId, Value},
     vars,
@@ -26,6 +27,7 @@ use crate::{
     FaultKind,
     GenericValue,
     Limits,
+    StackFrame,
     heap::{Heap, Object, ObjectId},
     profile::ProfileConfig,
     value::{IteratorId, ListData, ListId, ModifiedType, ProcRef, RangeValue, Receiver},
@@ -201,6 +203,58 @@ impl Runtime {
     }
 }
 
+fn list_operation(
+    op: Binary, entries: &mut Vec<(GenericValue, Option<GenericValue>)>,
+    right: Vec<(GenericValue, Option<GenericValue>)>,
+) {
+    // TODO: THE VM SHOULD NOT HANDLE THIS PLEASE MOVE IT TO THE FUCKING SEMA
+    match op {
+        Binary::Add => entries.extend(right),
+        Binary::Sub => entries.retain(|(key, _)| !right.iter().any(|(value, _)| value == key)),
+        Binary::BitAnd => entries.retain(|(key, _)| right.iter().any(|(value, _)| value == key)),
+        Binary::BitOr => {
+            for entry in right {
+                if !entries.iter().any(|(value, _)| *value == entry.0) {
+                    entries.push(entry);
+                }
+            }
+        },
+        Binary::BitXor => {
+            for entry in right {
+                if entries.iter().any(|(value, _)| *value == entry.0) {
+                    entries.retain(|(value, _)| *value != entry.0);
+                } else {
+                    entries.push(entry);
+                }
+            }
+        },
+        _ => {},
+    }
+}
+
+fn fault_at(module: &Module, current: Option<ProcId>, offset: Option<CodeOffset>, kind: FaultKind) -> Fault {
+    let frames = current
+        .map(|proc| stack_frame(module, proc, offset))
+        .into_iter()
+        .collect::<Vec<_>>();
+
+    Fault {
+        kind,
+        location: frames.first().map(|frame| frame.location).unwrap_or_default(),
+        frames,
+    }
+}
+
+fn stack_frame(module: &Module, proc: ProcId, offset: Option<CodeOffset>) -> StackFrame {
+    let location = offset
+        .and_then(|offset| module.line_at(offset))
+        .map(SourceLine::location)
+        .or_else(|| module.function_for_proc(proc).map(|function| function.location))
+        .unwrap_or_default();
+
+    StackFrame { proc, offset, location }
+}
+
 #[derive(Debug)]
 pub(crate) struct Frame {
     locals: Vec<GenericValue>,
@@ -251,6 +305,7 @@ pub(crate) struct Evaluator<'a> {
     pub rng: u64,
     thrown: Option<GenericValue>,
     iterators: Vec<IteratorState>,
+    vars_lists: HashMap<ObjectId, ListId>,
 }
 
 struct CallFrameGuard<'e, 'a> {
@@ -273,6 +328,18 @@ impl<'e, 'a> CallFrameGuard<'e, 'a> {
             previous_receiver,
             previous_offset,
         }
+    }
+}
+
+impl CallFrameGuard<'_, '_> {
+    fn unwound(&self, mut fault: Fault) -> Fault {
+        if let Some(proc) = self.previous_proc {
+            fault
+                .frames
+                .push(stack_frame(self.eval.module, proc, self.previous_offset));
+        }
+
+        fault
     }
 }
 
@@ -327,21 +394,12 @@ impl<'a> Evaluator<'a> {
             rng: seed.finish().max(1),
             thrown: None,
             iterators: Vec::new(),
+            vars_lists: HashMap::new(),
         }
     }
 
-    pub fn fault(&self, kind: FaultKind) -> Fault {
-        Fault {
-            offset: self.current_offset,
-            proc: self.current,
-            location: self
-                .current
-                .and_then(|proc| self.module.function_for_proc(proc))
-                .map(|function| function.location)
-                .unwrap_or_default(),
-            kind,
-        }
-    }
+    /// Callers add their frames as the fault unwinds through them
+    pub fn fault(&self, kind: FaultKind) -> Fault { fault_at(self.module, self.current, self.current_offset, kind) }
 
     pub fn charge(&mut self, amount: usize) -> Result<()> {
         self.instruction_budget_remaining = self
@@ -522,7 +580,9 @@ impl<'a> Evaluator<'a> {
         };
 
         let mut call = CallFrameGuard::enter(self, proc, src);
-        call.execute_until(&mut frame, None).map(|_| frame.dot)
+        call.execute_until(&mut frame, None)
+            .map(|_| frame.dot)
+            .map_err(|fault| call.unwound(fault))
     }
 
     fn function_name(&self, function: &CompiledFunction) -> String {
@@ -1071,13 +1131,19 @@ impl Evaluator<'_> {
     }
 
     pub(crate) fn object_mut(&mut self, id: ObjectId) -> Result<&mut Object> {
-        let fault = self.fault(FaultKind::InvalidReference);
-        self.runtime.heap.object_mut(id).map_err(|kind| Fault { kind, ..fault })
+        let (module, current, offset) = (self.module, self.current, self.current_offset);
+        self.runtime
+            .heap
+            .object_mut(id)
+            .map_err(|kind| fault_at(module, current, offset, kind))
     }
 
     pub(crate) fn list_mut(&mut self, id: ListId) -> Result<&mut ListData> {
-        let fault = self.fault(FaultKind::InvalidReference);
-        self.runtime.heap.list_mut(id).map_err(|kind| Fault { kind, ..fault })
+        let (module, current, offset) = (self.module, self.current, self.current_offset);
+        self.runtime
+            .heap
+            .list_mut(id)
+            .map_err(|kind| fault_at(module, current, offset, kind))
     }
 
     fn name_target(&self, frame: &Frame, name: &Identifier) -> GenericValue {
@@ -1119,7 +1185,7 @@ impl Evaluator<'_> {
             Receiver::None => None,
             Receiver::Object(id) => self.runtime.heap.object(id).map(|object| object.ty),
             Receiver::List(id) => match self.runtime.heap.list(id)?.kind {
-                crate::value::ListKind::List => self.tree.roots().list,
+                crate::value::ListKind::List | crate::value::ListKind::Vars(_) => self.tree.roots().list,
                 crate::value::ListKind::Alist => self.tree.roots().alist,
             },
         }
@@ -1487,6 +1553,10 @@ impl Evaluator<'_> {
 
 impl Evaluator<'_> {
     fn read_vars(&mut self, id: ObjectId) -> Result<GenericValue> {
+        if let Some(list) = self.vars_lists.get(&id) {
+            return Ok(GenericValue::List(*list));
+        }
+
         let object = self
             .runtime
             .heap
@@ -1496,8 +1566,19 @@ impl Evaluator<'_> {
 
         let mut names = object.vars.keys().cloned().collect::<HashSet<_>>();
         names.extend([vars::TYPE, vars::PARENT_TYPE, vars::VARS, vars::TAG].map(Identifier::from));
-        for declaration in self.tree.ancestors(ty) {
-            names.extend(declaration.vars.keys().cloned());
+        // instance vars only: no globals, which live on the root, and no static vars
+        for declaration in self
+            .tree
+            .ancestors(ty)
+            .filter(|declaration| declaration.id != TypeId::ROOT)
+        {
+            names.extend(
+                declaration
+                    .vars
+                    .iter()
+                    .filter(|(_, variable)| !(variable.modifiers.is_global || variable.modifiers.is_static))
+                    .map(|(name, _)| name.clone()),
+            );
         }
 
         let mut names = names.into_iter().collect::<Vec<_>>();
@@ -1513,7 +1594,13 @@ impl Evaluator<'_> {
             entries.push((GenericValue::Text(name.as_str().into()), Some(value)));
         }
 
-        self.list(entries)
+        let list = self.list(entries)?;
+        if let GenericValue::List(list_id) = list {
+            self.list_mut(list_id)?.kind = crate::value::ListKind::Vars(id);
+            self.vars_lists.insert(id, list_id);
+        }
+
+        Ok(list)
     }
 
     pub fn read_field(&mut self, object: GenericValue, name: &Identifier) -> Result<GenericValue> {
@@ -1584,13 +1671,11 @@ impl Evaluator<'_> {
                     return self.call(initializer, Some(dummy), Vec::new());
                 }
 
-                let value = self
-                    .tree
-                    .var_inherited(ty, name)
-                    .map(|variable| variable.value.clone())
-                    .ok_or_else(|| self.fault(FaultKind::MissingVariable(key.into())))?;
+                let Some(variable) = self.tree.var_inherited(ty, name) else {
+                    return Ok(GenericValue::Null);
+                };
 
-                self.constant(&value)
+                self.constant(&variable.value.clone())
             },
             GenericValue::Object(id) => {
                 if matches!(key, vars::OVERLAYS | vars::UNDERLAYS) {
@@ -1726,6 +1811,11 @@ impl Evaluator<'_> {
                     {
                         self.list(Vec::new())?
                     },
+                    Some(Value::Unevaluated) => {
+                        return Err(self.fault(FaultKind::Unsupported(format!(
+                            "the initializer of {key} was not compiled"
+                        ))));
+                    },
                     Some(value) => self.constant(&value)?,
                     None if key == vars::TAG => GenericValue::Null,
                     None => return Err(self.fault(FaultKind::MissingVariable(key.into()))),
@@ -1747,6 +1837,7 @@ impl Evaluator<'_> {
 
                 Ok(value)
             },
+            GenericValue::Null => Err(self.fault(FaultKind::Null(format!("read null.{key}")))),
             _ => Err(self.fault(FaultKind::InvalidReference)),
         }
     }
@@ -1810,7 +1901,7 @@ impl Evaluator<'_> {
                 let mut vars = source.vars;
                 for declaration in self.tree.ancestors(source.ty) {
                     for (key, variable) in &declaration.vars {
-                        if !vars.contains_key(key) && variable.value != Value::Unevaluated {
+                        if !vars.contains_key(key) && variable.value.is_constant() {
                             let value = self
                                 .runtime
                                 .constant(&variable.value, self.limits)
@@ -1871,6 +1962,7 @@ impl Evaluator<'_> {
                 self.object_mut(storage)?.vars.insert(key, value);
                 Ok(())
             },
+            GenericValue::Null => Err(self.fault(FaultKind::Null(format!("modify null.{key}")))),
             _ => Err(self.fault(FaultKind::InvalidOperation(format!("cannot write {key}")))),
         }
     }
@@ -1880,6 +1972,20 @@ impl Evaluator<'_> {
             GenericValue::List(id) | GenericValue::ArgList(id) => id,
             _ => return Err(self.fault(FaultKind::InvalidReference)),
         };
+
+        if let Some(owner) = self.vars_owner(id)
+            && let GenericValue::Text(name) = &key
+        {
+            self.write_field(GenericValue::Object(owner), Identifier::from(&**name), value.clone())?;
+            let list = self.list_mut(id)?;
+            if let Some(index) = list.position(&key)
+                && let Some(entry) = list.entries.get_mut(index)
+            {
+                entry.1 = Some(value);
+            }
+
+            return Ok(());
+        }
 
         if let GenericValue::Num(number) = key {
             let index = (number as usize).wrapping_sub(1);
@@ -1905,7 +2011,21 @@ impl Evaluator<'_> {
         Ok(())
     }
 
+    fn vars_owner(&self, list: ListId) -> Option<ObjectId> {
+        match self.runtime.heap.list(list)?.kind {
+            crate::value::ListKind::Vars(owner) => Some(owner),
+            _ => None,
+        }
+    }
+
     pub fn get_index(&mut self, object: GenericValue, key: GenericValue) -> Result<GenericValue> {
+        if let GenericValue::List(id) = object
+            && let Some(owner) = self.vars_owner(id)
+            && let GenericValue::Text(name) = &key
+        {
+            return self.read_field(GenericValue::Object(owner), &Identifier::from(&**name));
+        }
+
         match object {
             GenericValue::Null => Ok(GenericValue::Null),
             GenericValue::List(id) | GenericValue::ArgList(id) => self
@@ -2007,37 +2127,10 @@ impl Evaluator<'_> {
                 .list(id)
                 .map(|list| list.entries.clone())
                 .ok_or_else(|| self.fault(FaultKind::InvalidReference))?;
-            let right = match right {
-                GenericValue::List(id) | GenericValue::ArgList(id) => self
-                    .runtime
-                    .heap
-                    .list(id)
-                    .map(|list| list.entries.clone())
-                    .unwrap_or_default(),
-                value => vec![(value, None)],
-            };
-            match op {
-                Add => entries.extend(right),
-                Sub => entries.retain(|(key, _)| !right.iter().any(|(value, _)| value == key)),
-                BitAnd => entries.retain(|(key, _)| right.iter().any(|(value, _)| value == key)),
-                BitOr => {
-                    for entry in right {
-                        if !entries.iter().any(|(value, _)| *value == entry.0) {
-                            entries.push(entry);
-                        }
-                    }
-                },
-                BitXor => {
-                    for entry in right {
-                        if entries.iter().any(|(value, _)| *value == entry.0) {
-                            entries.retain(|(value, _)| *value != entry.0);
-                        } else {
-                            entries.push(entry);
-                        }
-                    }
-                },
-                _ => {},
-            }
+
+            let right = self.list_operand(right);
+            list_operation(op, &mut entries, right);
+
             return self.list(entries);
         }
 
@@ -2091,30 +2184,51 @@ impl Evaluator<'_> {
         })
     }
 
+    /// `L += x` changes `L` itself, so every alias of it sees the change
     fn compound_binary(&mut self, op: Binary, left: GenericValue, right: GenericValue) -> Result<GenericValue> {
-        if let GenericValue::List(id) = left
-            && matches!(
-                op,
-                Binary::Add | Binary::Sub | Binary::BitOr | Binary::BitAnd | Binary::BitXor
-            )
-        {
-            let value = self.binary(op, GenericValue::List(id), right)?;
-            let GenericValue::List(result) = value else {
-                return Err(self.fault(FaultKind::InvalidReference));
-            };
+        let GenericValue::List(id) = left else {
+            return self.binary(op, left, right);
+        };
 
-            let entries = self
+        // TODO: Same complaint about before, I don't like handling lists like this,
+        // they should be either handled during semantic analysis or IR lowering
+
+        if !matches!(
+            op,
+            Binary::Add | Binary::Sub | Binary::BitOr | Binary::BitAnd | Binary::BitXor
+        ) {
+            return self.binary(op, left, right);
+        }
+
+        let right = self.list_operand(right);
+        if op == Binary::Add {
+            self.reserve(right.len())?;
+            let list = self.list_mut(id)?;
+            for (key, value) in right {
+                list.push(key, value);
+            }
+
+            return Ok(GenericValue::List(id));
+        }
+
+        let list = self.list_mut(id)?;
+        let mut entries = std::mem::take(&mut list.entries);
+        list_operation(op, &mut entries, right);
+        list.replace(entries);
+
+        Ok(GenericValue::List(id))
+    }
+
+    /// The entries `list OP value` combines with: a list's own, or the value alone
+    fn list_operand(&self, value: GenericValue) -> Vec<(GenericValue, Option<GenericValue>)> {
+        match value {
+            GenericValue::List(id) | GenericValue::ArgList(id) => self
                 .runtime
                 .heap
-                .list(result)
+                .list(id)
                 .map(|list| list.entries.clone())
-                .ok_or_else(|| self.fault(FaultKind::InvalidReference))?;
-
-            self.list_mut(id)?.replace(entries);
-
-            Ok(GenericValue::List(id))
-        } else {
-            self.binary(op, left, right)
+                .unwrap_or_default(),
+            value => vec![(value, None)],
         }
     }
 
@@ -2448,7 +2562,13 @@ impl Evaluator<'_> {
             self.write_field(GenericValue::Object(id), name, value)?;
         }
 
-        if let Some(loc) = args.first().and_then(|(_, value)| value.object()) {
+        // only a movable's first argument is where it is made, a datum just receives it
+        let is_movable = self
+            .tree
+            .roots()
+            .movable
+            .is_some_and(|movable| self.tree.is_subtype_of(ty, movable));
+        if is_movable && let Some(loc) = args.first().and_then(|(_, value)| value.object()) {
             self.runtime
                 .heap
                 .relocate(id, Some(loc))

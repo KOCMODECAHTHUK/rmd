@@ -993,10 +993,17 @@ pub(crate) enum Panel {
     Git,
     Inspector,
     Search,
+    Runtimes,
 }
 
 impl Panel {
-    pub const ALL: [Self; 4] = [Self::ObjectTree, Self::Git, Self::Inspector, Self::Search];
+    pub const ALL: [Self; 5] = [
+        Self::ObjectTree,
+        Self::Git,
+        Self::Inspector,
+        Self::Search,
+        Self::Runtimes,
+    ];
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -1006,6 +1013,7 @@ pub(crate) struct OpenPanels {
     pub git: bool,
     pub inspector: bool,
     pub search: bool,
+    pub runtimes: bool,
 }
 
 impl OpenPanels {
@@ -1015,6 +1023,7 @@ impl OpenPanels {
             Panel::Git => self.git,
             Panel::Inspector => self.inspector,
             Panel::Search => self.search,
+            Panel::Runtimes => self.runtimes,
         }
     }
 
@@ -1024,6 +1033,7 @@ impl OpenPanels {
             Panel::Git => &mut self.git,
             Panel::Inspector => &mut self.inspector,
             Panel::Search => &mut self.search,
+            Panel::Runtimes => &mut self.runtimes,
         }
     }
 }
@@ -1035,6 +1045,7 @@ impl Default for OpenPanels {
             git: true,
             inspector: true,
             search: true,
+            runtimes: false,
         }
     }
 }

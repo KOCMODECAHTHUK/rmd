@@ -1,7 +1,7 @@
 pub use core::types::{IrNodeId, ProcId, ProcKind, ProcParam};
 use core::{
     interner::SymbolMap,
-    location::Location,
+    location::{LineTable, Location},
     path::TreePath,
     types::{Identifier, Value, VarSpec},
 };
@@ -454,6 +454,7 @@ pub struct Module {
     pub external_functions: Vec<IrNodeId>,
     pub procs: Vec<Procedure>,
     pub index: ProcIndex,
+    pub node_lines: LineTable<IrNodeId>,
 }
 
 #[derive(Debug, Clone, Default)]

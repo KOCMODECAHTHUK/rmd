@@ -53,6 +53,7 @@ mod menu;
 mod node;
 mod overlay;
 mod paste;
+mod runtimes;
 mod search;
 mod toolbar;
 mod tooltip;
@@ -264,6 +265,7 @@ pub struct UiState {
     welcome_window: WindowKey,
     inspector: InspectorPanel,
     find: find::FindPanel,
+    runtimes: runtimes::RuntimesPanel,
     git_panel: git::GitPanel,
     /// Keeps the object tree in front of the Git tab while its saved layout settles
     select_object_tree: StartupPanelFocus,
@@ -326,6 +328,7 @@ impl UiState {
         let welcome_window = WindowKey::new("welcome", "Welcome")?;
         let inspector = InspectorPanel::new()?;
         let find = find::FindPanel::new()?;
+        let runtimes = runtimes::RuntimesPanel::new()?;
         let git_panel = git::GitPanel::new()?;
         let settings_window = SettingsWindow::new()?;
         let load_window = WindowKey::new("load", "Loading")?;
@@ -344,6 +347,7 @@ impl UiState {
             welcome_window,
             inspector,
             find,
+            runtimes,
             git_panel,
             select_object_tree: StartupPanelFocus::new(),
             select_inspector: StartupPanelFocus::new(),
@@ -594,6 +598,7 @@ impl UiState {
             Panel::Git => self.git_panel.focus(),
             Panel::Inspector => self.select_inspector = StartupPanelFocus::new(),
             Panel::Search => self.find.request(),
+            Panel::Runtimes => self.runtimes.request(),
         }
     }
 
@@ -864,10 +869,15 @@ impl UiState {
             self.jump_to_instance(session, target);
         }
 
+        let runtimes = self.runtimes.draw(ui, session, settings, &mut panels.runtimes);
         let git_output = self.git_panel.draw(ui, session, settings, &mut panels.git);
         settings.panels = panels;
         if git_output.copy.is_some() {
             self.copy_to_clipboard = git_output.copy;
+        }
+
+        if runtimes.copy.is_some() {
+            self.copy_to_clipboard = runtimes.copy;
         }
 
         if let Some((id, coord)) = git_output.center {
@@ -878,7 +888,10 @@ impl UiState {
             self.pending_conflict_reload = Some(id);
         }
 
-        inspector.open_source.or(object_tree.open_source)
+        inspector
+            .open_source
+            .or(object_tree.open_source)
+            .or(runtimes.open_source)
     }
 
     fn draw_reload_conflicts_popup(&mut self, ui: &Ui, session: &Session) -> Option<DocumentId> {
@@ -1275,7 +1288,8 @@ mod tests {
     fn resetting_the_layout_reopens_every_panel() {
         let mut state = UiState::new(false).unwrap();
         let mut settings = Settings::default();
-        for panel in Panel::ALL {
+        let open = Panel::ALL.into_iter().filter(|panel| settings.panels.is_open(*panel));
+        for panel in open.collect::<Vec<_>>() {
             state.apply_window_actions(&mut settings, &toggle(panel));
         }
         assert!(Panel::ALL.into_iter().all(|panel| !settings.panels.is_open(panel)));

@@ -1,4 +1,4 @@
-use core::{types::Identifier, vars};
+use core::{path::TreePath, types::Identifier, vars};
 
 use objtree::TypeId;
 
@@ -77,7 +77,10 @@ impl Evaluator<'_> {
                 key
             };
 
-            if key.as_str() == vars::ICON && matches!(value, GenericValue::Object(_)) {
+            if key.as_str() == vars::ICON && self.is_icon_datum(&value) {
+                let file = self.icon_file(value);
+                self.write_field(GenericValue::Object(id), key, file)?;
+            } else if key.as_str() == vars::ICON && matches!(value, GenericValue::Object(_)) {
                 self.write_field(GenericValue::Object(id), vars::APPEARANCE.into(), value)?;
             } else {
                 self.write_field(GenericValue::Object(id), key, value)?;
@@ -85,6 +88,20 @@ impl Evaluator<'_> {
         }
 
         Ok(GenericValue::Object(id))
+    }
+
+    /// `image(icon('x.dmi'))` takes the icon, where `image(atom)` copies the atom's appearance
+    fn is_icon_datum(&self, value: &GenericValue) -> bool {
+        let GenericValue::Object(id) = value else {
+            return false;
+        };
+
+        let icon = self.tree.id_of(&TreePath::parse("/icon"));
+        self.runtime
+            .heap
+            .object(*id)
+            .zip(icon)
+            .is_some_and(|(object, icon)| self.tree.is_subtype_of(object.ty, icon))
     }
 
     pub fn list_builtin(&mut self, proc: Intrinsic, id: ListId, args: Vec<GenericValue>) -> Result<GenericValue> {

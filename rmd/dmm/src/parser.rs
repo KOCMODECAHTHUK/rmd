@@ -116,7 +116,7 @@ impl<'a> MapParser<'a> {
         }
     }
 
-    fn skip_trivia(&mut self) {
+    fn skip_trivial(&mut self) {
         loop {
             match self.peek() {
                 Some(b' ' | b'\t' | b'\r' | b'\n') => {
@@ -143,7 +143,7 @@ impl<'a> MapParser<'a> {
     }
 
     pub fn parse(&mut self) -> (Map, Vec<MapError>) {
-        self.skip_trivia();
+        self.skip_trivial();
         let format = self.detect_format();
         let dictionary = self.parse_dictionary();
         let blocks = self.parse_blocks(&dictionary);
@@ -176,7 +176,7 @@ impl<'a> MapParser<'a> {
         let mut dictionary = HashMap::new();
 
         loop {
-            self.skip_trivia();
+            self.skip_trivial();
             if self.peek() != Some(b'"') {
                 break;
             }
@@ -225,22 +225,22 @@ impl<'a> MapParser<'a> {
 
         let key = Key::parse(&text).map_err(|_| self.error(MapErrorKind::InvalidKey(text.clone())))?;
 
-        self.skip_trivia();
+        self.skip_trivial();
         self.expect(b'=')?;
-        self.skip_trivia();
+        self.skip_trivial();
         self.expect(b'(')?;
 
         let mut tile = Tile::new();
-        self.skip_trivia();
+        self.skip_trivial();
         // `"b" = ()`, a tile everything was deleted from
         if self.eat(b')') {
             return Ok((key, text, tile));
         }
 
         loop {
-            self.skip_trivia();
+            self.skip_trivial();
             tile.push(self.parse_prefab()?);
-            self.skip_trivia();
+            self.skip_trivial();
             if self.eat(b',') {
                 continue;
             }
@@ -277,7 +277,7 @@ impl<'a> MapParser<'a> {
         }
 
         loop {
-            self.skip_trivia();
+            self.skip_trivial();
             // `{dir = 4;\n\t}` and `{}`
             if self.eat(b'}') {
                 break;
@@ -293,15 +293,15 @@ impl<'a> MapParser<'a> {
                 return Err(self.error(MapErrorKind::MalformedPrefab(text.to_string())));
             }
 
-            self.skip_trivia();
+            self.skip_trivial();
             self.expect(b'=')?;
-            self.skip_trivia();
+            self.skip_trivial();
             let value_start = self.offset;
             let value = self.parse_value()?;
             let source = self.slice_from(value_start)?;
             prefab.set_var_from_source(Identifier::from(name), value, source);
 
-            self.skip_trivia();
+            self.skip_trivial();
             if self.eat(b';') {
                 continue;
             }
@@ -327,6 +327,16 @@ impl<'a> MapParser<'a> {
                 Ok(Value::Path(TreePath::parse(self.slice_from(start)?)))
             },
             Some(b'-' | b'+' | b'.' | b'0'..=b'9') => self.parse_number(),
+            // `camera_networks = ("Owlery")`
+            Some(b'(') => {
+                self.bump();
+                self.skip_trivial();
+                let value = self.parse_value()?;
+                self.skip_trivial();
+                self.expect(b')')?;
+
+                Ok(value)
+            },
             Some(b'a'..=b'z' | b'A'..=b'Z' | b'_') => {
                 let start = self.offset;
                 while matches!(self.peek(), Some(b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_')) {
@@ -379,24 +389,24 @@ impl<'a> MapParser<'a> {
         self.expect(b'(')?;
         let mut entries = Vec::new();
 
-        self.skip_trivia();
+        self.skip_trivial();
         if self.eat(b')') {
             return Ok(Value::List(entries));
         }
 
         loop {
-            self.skip_trivia();
+            self.skip_trivial();
             let key = self.parse_value()?;
-            self.skip_trivia();
+            self.skip_trivial();
             let value = if self.eat(b'=') {
-                self.skip_trivia();
+                self.skip_trivial();
                 Some(self.parse_value()?)
             } else {
                 None
             };
             entries.push(ListEntry { key, value });
 
-            self.skip_trivia();
+            self.skip_trivial();
             if self.eat(b',') {
                 continue;
             }
@@ -441,7 +451,7 @@ impl<'a> MapParser<'a> {
         }
 
         loop {
-            self.skip_trivia();
+            self.skip_trivial();
             if self.peek() != Some(b'(') {
                 break;
             }
@@ -641,9 +651,9 @@ pub fn parse(source: &str) -> (Map, Vec<MapError>) { MapParser::new(source).pars
 
 pub fn parse_value(source: &str) -> MapResult<Value> {
     let mut parser = MapParser::new(source);
-    parser.skip_trivia();
+    parser.skip_trivial();
     let value = parser.parse_value()?;
-    parser.skip_trivia();
+    parser.skip_trivial();
 
     if !parser.is_eof() {
         return Err(parser.error(MapErrorKind::MalformedValue(source.to_string())));
@@ -855,6 +865,17 @@ mod tests {
         ));
 
         assert!(matches!(&vars[0].1.value, Value::Path(path) if !path.absolute));
+    }
+
+    #[test]
+    fn a_grouped_value_reads_as_its_inner_value_and_keeps_its_spelling() {
+        let vars = prefab_vars(concat!(
+            "\"a\" = (/obj/tv{camera_networks = (\"Owlery\")},/area)\n",
+            "\n(1,1,1) = {\"\na\n\"}\n",
+        ));
+
+        assert_eq!(vars[0].1.value, Value::Text(String::from("Owlery")));
+        assert_eq!(vars[0].1.verbatim(), Some("(\"Owlery\")"));
     }
 
     #[test]

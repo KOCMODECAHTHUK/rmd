@@ -15,7 +15,6 @@
 /atom/proc/demir_prepare_state()
 	return
 
-// `New()`
 /turf/simulated/wall/auto/asteroid/demir_prepare_state()
 	LAZYLISTINIT(topoverlaycache)
 	space_overlays = list()
@@ -23,7 +22,6 @@
 	orenumber = pick(1, 2, 3)
 	color = stone_color
 
-// `New()`
 /obj/machinery/firealarm/demir_prepare_state()
 	alarm_base_overlay = image(icon, src, "fireoff")
 	alarm_overlay = image(icon, src, "fireoff")
@@ -32,16 +30,13 @@
 	alarm_overlay.layer = LIGHTING_LAYER_BASE
 	alarm_overlay.alpha = 80
 
-// `New()`
 /obj/machinery/portable_atmospherics/canister/demir_prepare_state()
 	atmos_dmi = image('icons/obj/atmospherics/atmos.dmi')
 	bomb_dmi = image('icons/obj/canisterbomb.dmi')
 
-// `New()` saves the mapped state before update_icon() restores it.
 /obj/disposalpipe/demir_prepare_state()
 	base_icon_state = icon_state
 
-// `New()` reads the mapped endpoints before update_icon() rebuilds the state.
 /obj/cable/demir_prepare_state()
 	var/separator = findtext(icon_state, "-")
 	if(separator)
@@ -52,8 +47,159 @@
 	d1 = 0
 	d2 = 0
 
+/obj/item/demir_prepare_state()
+	if(inventory_counter_enabled)
+		create_inventory_counter()
+		if(amount != 1)
+			inventory_counter.update_number(amount)
+
+/obj/item/reagent_containers/demir_prepare_state()
+	..()
+	ensure_reagent_holder()
+	create_initial_reagents()
+
+/obj/item/reagent_containers/food/snacks/demir_prepare_state()
+	if(!uneaten_bites_left)
+		uneaten_bites_left = initial(bites_left)
+	..()
+
+/obj/item/reagent_containers/food/snacks/ingredient/egg/chicken/demir_prepare_state()
+	..()
+	if(egg_props_path)
+		chicken_egg_props = new egg_props_path(src)
+
+/obj/machinery/nuclear_reactor/demir_prepare_state()
+	input = new /obj/machinery/atmospherics/unary/node
+	output = new /obj/machinery/atmospherics/unary/node
+
+/obj/item/ammo/bullets/tranq_darts/demir_prepare_state()
+	..()
+	demir_cache_reagent(ammo_type?.reagent_payload)
+
+/obj/item/gun/reagent/demir_prepare_state()
+	..()
+	create_reagents(capacity)
+
+/obj/item/gun/energy/tasersmg/demir_prepare_state()
+	..()
+	set_current_projectile(new /datum/projectile/energy_bolt/smgburst)
+	projectiles = list(current_projectile, new /datum/projectile/energy_bolt/smgauto)
+
+/obj/item/sword/demir_prepare_state()
+	..()
+	AddComponent(/datum/component/loctargeting/simple_light, 255, 255, 255, 150)
+
+/obj/reagent_dispensers/demir_prepare_state()
+	create_reagents(capacity)
+
+/obj/machinery/clonegrinder/demir_prepare_state()
+	create_reagents(100)
+
+/obj/machinery/fluid_canister/demir_prepare_state()
+	create_reagents(bladder)
+
+/obj/item/material_piece/demir_prepare_state()
+	..()
+	if(!material && default_material)
+		setMaterial(getMaterial(default_material))
+
+/obj/item/gun/kinetic/demir_prepare_state()
+	..()
+	if(!ammo && default_magazine)
+		ammo = new default_magazine
+
+/obj/machinery/portable_atmospherics/pump/demir_prepare_state()
+	tank_hatch = image('icons/obj/atmospherics/atmos.dmi', "")
+
+/obj/machinery/networked/test_apparatus/heater/demir_prepare_state()
+	heat_overlay = image('icons/obj/networked.dmi', "")
+
+/obj/machinery/vending/player/chemicals/demir_prepare_state()
+	fill_image = image(icon, "medchem-0", -1)
+	fill_image.plane = PLANE_ABOVE_LIGHTING
+
+/obj/storage/crate/loot/demir_prepare_state()
+	light = image('icons/obj/storage/crate.dmi', "lootcratelocklight")
+
+/obj/machinery/interdictor/demir_prepare_state()
+	intcap = new /obj/item/cell/supercell/charged(src)
+
+/obj/machinery/gravity_tether/demir_prepare_state()
+	cell = new cell_type_path(src)
+	last_charge_amount = cell.charge
+	MA = mutable_appearance(icon, icon_state)
+	ma_graviton = mutable_appearance(icon, "graviton-idle")
+	ma_door = mutable_appearance(icon, "door-closed")
+	ma_cell = mutable_appearance('icons/obj/power.dmi', "apc-hpcell")
+	ma_cell.pixel_y = -4
+	ma_cell.dir = SOUTH
+	ma_cell_charge = mutable_appearance('icons/obj/power.dmi', "cell02")
+	ma_cell_charge.pixel_y = 1
+	ma_cell_charge.pixel_x = 1
+	ma_cell_charge.dir = SOUTH
+	ma_wires = mutable_appearance(icon, "wires-intact")
+	ma_tamper = mutable_appearance(icon, "tamper-secure")
+	ma_bat = mutable_appearance(icon, "battery-full")
+	ma_bat_charge = mutable_appearance(icon, "power-charging")
+	ma_status = mutable_appearance(icon, "status-working")
+	ma_graph = mutable_appearance(icon, "graph-good")
+	ma_screen = mutable_appearance(icon, "screen-locked")
+	ma_intensity = mutable_appearance(icon, "level-2")
+	ma_dials = mutable_appearance(icon, "dials-regular")
+	update_ma_bat()
+	update_ma_tamper()
+	update_ma_cell()
+	update_ma_screen()
+
+/obj/machinery/power/lgenerator/demir_prepare_state()
+	spin_sprite = new /image(icon, "ggen-spin")
+	tank_sprite = new /image(icon, "ggen-tank")
+
+/obj/item/tripod_bulb/demir_bake_icon()
+	return
+
+/obj/item/material_piece/demir_bake_icon()
+	if(material)
+		..()
+
+/obj/item/assembly/demir_bake_icon()
+	return
+
 /datum/demir/goonstation
 	default = TRUE
+
+/proc/getMaterial(mat)
+	if(!istext(mat))
+		return null
+	if(!material_cache)
+		material_cache = list()
+	if(!(mat in material_cache))
+		for(var/datum/material/type as anything in concrete_typesof(/datum/material))
+			if(initial(type.cached) && initial(type.mat_id) == mat)
+				material_cache[mat] = new type()
+				break
+	return material_cache[mat]
+
+/proc/demir_cache_reagent(reagent)
+	if(!istext(reagent) || (reagent in reagents_cache))
+		return
+	for(var/datum/reagent/type as anything in concrete_typesof(/datum/reagent))
+		if(initial(type.id) == reagent)
+			reagents_cache[reagent] = new type()
+			return
+
+/datum/reagents/add_reagent(reagent, amount, sdata, temp_new = T20C, donotreact = 0, donotupdate = 0, chemical_reaction = FALSE, chem_reaction_priority = 1)
+	demir_cache_reagent(reagent)
+	return ..()
+
+/datum/bioluminescent_algae/get_color(atom/A, force = FALSE)
+	return null
+
+/proc/logTheThing(type, source, text, diaryType)
+	return
+
+/proc/build_chem_structure()
+	return
 
 /datum/demir/goonstation/prepare(atom/target)
 	target.get_typeinfo()
@@ -66,8 +212,6 @@
 /turf/simulated/wall/auto/asteroid/demir_bake_extras()
 	space_overlays()
 
-// The rock texture on top is cut to the wall shape by an alpha filter the editor cannot draw. The
-// smoothed base state already carries that shape.
 /turf/simulated/wall/auto/asteroid/top_overlays()
 	return
 
@@ -77,8 +221,6 @@
 		ore_overlay.layer = ASTEROID_ORE_OVERLAY_LAYER
 		AddOverlays(ore_overlay, "ast_ore")
 
-// Starlight only shows where it lands on something that is not already fullbright, and open space
-// would otherwise add one sprite per tile.
 /turf/space/demir_bake_extras()
 	if(!length(underlays))
 		return
@@ -88,8 +230,6 @@
 			return
 	underlays = list()
 
-// The screen glow New() builds and power_change() adds. The 0.33 grayscale matrix it uses is
-// flattened to its brightness.
 /atom/proc/demir_add_screen_glow(glow_icon, glow_state)
 	var/image/screen = image(glow_icon, glow_state, -1)
 	screen.plane = PLANE_LIGHTING
@@ -346,6 +486,19 @@
 
 /obj/submachine/GTM/demir_prepare_lights()
 	light = demir_attach_light(0.4)
+
+// update_icon() switches these on and off.
+/obj/machinery/networked/secdetector/demir_prepare_lights()
+	light = demir_attach_light(1, 0.2, 0.65, 0.2, enabled = FALSE)
+
+/obj/machinery/power/lgenerator/demir_prepare_lights()
+	light = demir_attach_light(0.8, enabled = FALSE)
+
+/obj/machinery/power/catalytic_generator/demir_prepare_lights()
+	light = demir_attach_light(0.3, enabled = FALSE)
+
+/obj/machinery/gravity_tether/demir_prepare_lights()
+	light = demir_attach_light(0.8, height = 1.5, enabled = FALSE)
 
 /obj/decal/xmas_lights/demir_prepare_lights()
 	light = demir_attach_light(0.3, 0.2, 0.6, 0.9)

@@ -264,6 +264,26 @@ pub(super) fn node_environment_with_profile(profile: &'static str) -> Environmen
     environment
 }
 
+/// One floor tile whose profile faults in `bake()` and `ui()`
+pub(crate) fn faulting_profile_session() -> (Session, DocumentId) {
+    let environment =
+        node_environment_with_profile(include_str!("../../tests/fixtures/programs/runtime_faults_profile.dm"));
+    let document = MapDocument::new(node_map(1, 1, &[]), 1);
+    let bake = editor::bake::build(&environment, &document).expect("the profile bakes");
+    let mut session = Session::new();
+    session.state.environment = Some(Arc::new(environment));
+    let id = session.state.open_document(document);
+    session.caches.insert(
+        id,
+        DocumentCache {
+            bake: Some(bake),
+            ..Default::default()
+        },
+    );
+
+    (session, id)
+}
+
 pub(crate) fn node_map(width: u32, height: u32, placements: &[(Coord, Vec<&str>)]) -> Map {
     let mut map = Map::new(Size {
         x: width,

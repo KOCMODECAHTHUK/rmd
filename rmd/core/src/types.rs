@@ -26,7 +26,7 @@ impl std::fmt::Debug for ProcId {
 }
 
 /// this points to an IR arena in Module
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct IrNodeId(pub u32);
 
 impl IrNodeId {
@@ -85,6 +85,17 @@ pub struct ListEntry {
 }
 
 impl Value {
+    /// `list("a" = new /obj)` folds to a list that still holds an unevaluated entry
+    pub fn is_constant(&self) -> bool {
+        match self {
+            Value::Unevaluated => false,
+            Value::List(entries) => entries
+                .iter()
+                .all(|entry| entry.key.is_constant() && entry.value.as_ref().is_none_or(Value::is_constant)),
+            _ => true,
+        }
+    }
+
     pub fn as_num(&self) -> Option<f32> {
         match self {
             Value::Num(v) => Some(*v),

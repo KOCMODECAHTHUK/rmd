@@ -1,4 +1,3 @@
-use core::types::ProcId;
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
@@ -19,7 +18,7 @@ pub mod ui;
 pub mod value;
 pub mod world;
 
-pub use error::{Fault, FaultKind};
+pub use error::{Fault, FaultKey, FaultKind, StackFrame, proc_name};
 pub use eval::Runtime;
 pub use maploader::MapLoader;
 pub use prelude::Intrinsic;
@@ -46,27 +45,38 @@ impl Default for Limits {
     }
 }
 
-/// What `icon_states()` answers with. The host reads the `.dmi` files, since the vm never touches disk.
+/// Workaround for icon_states() and related icon.# procs
+/// TODO: think more about this
 #[derive(Debug, Clone, Default)]
-pub struct IconStates(Arc<HashMap<String, Vec<Arc<str>>>>);
+pub struct IconStates(Arc<HashMap<String, IconInfo>>);
+
+#[derive(Debug, Clone)]
+struct IconInfo {
+    states: Vec<Arc<str>>,
+    size: [u32; 2],
+}
 
 impl IconStates {
-    pub fn new(icons: impl IntoIterator<Item = (String, Vec<String>)>) -> Self {
+    pub fn new(icons: impl IntoIterator<Item = (String, Vec<String>, [u32; 2])>) -> Self {
         let mut table = HashMap::new();
-        for (path, states) in icons {
+        for (path, states, size) in icons {
             let mut seen = HashSet::new();
-            let names = states
+            let states = states
                 .into_iter()
                 .filter(|state| seen.insert(state.clone()))
                 .map(Arc::from)
                 .collect::<Vec<_>>();
-            table.insert(icon_key(&path), names);
+            table.insert(icon_key(&path), IconInfo { states, size });
         }
 
         Self(Arc::new(table))
     }
 
-    pub(crate) fn get(&self, path: &str) -> Option<&[Arc<str>]> { self.0.get(&icon_key(path)).map(Vec::as_slice) }
+    pub(crate) fn get(&self, path: &str) -> Option<&[Arc<str>]> {
+        self.0.get(&icon_key(path)).map(|icon| icon.states.as_slice())
+    }
+
+    pub(crate) fn size(&self, path: &str) -> Option<[u32; 2]> { self.0.get(&icon_key(path)).map(|icon| icon.size) }
 }
 
 /// BYOND resolves resource paths case-insensitively and accepts either slash.
@@ -81,18 +91,12 @@ pub struct Diagnostic {
 #[derive(Debug, Default)]
 pub struct Diagnostics {
     pub entries: Vec<Diagnostic>,
-    index: HashMap<(Option<ProcId>, u32, u32, u32, FaultKind), usize>,
+    index: HashMap<FaultKey, usize>,
 }
 
 impl Diagnostics {
     pub fn record(&mut self, fault: Fault) {
-        let key = (
-            fault.proc,
-            fault.location.file.0,
-            fault.location.begin.line,
-            fault.location.begin.col,
-            fault.kind.clone(),
-        );
+        let key = fault.key();
 
         if let Some(index) = self.index.get(&key) {
             if let Some(entry) = self.entries.get_mut(*index) {
@@ -105,13 +109,7 @@ impl Diagnostics {
     }
 
     pub fn remove(&mut self, fault: &Fault) {
-        let key = (
-            fault.proc,
-            fault.location.file.0,
-            fault.location.begin.line,
-            fault.location.begin.col,
-            fault.kind.clone(),
-        );
+        let key = fault.key();
 
         if let Some(index) = self.index.get(&key)
             && let Some(entry) = self.entries.get_mut(*index)

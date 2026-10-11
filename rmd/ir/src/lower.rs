@@ -1,6 +1,6 @@
 use core::{
     path::{PathFlags, TreePath},
-    types::{Identifier, Value},
+    types::Identifier,
     vars,
 };
 
@@ -66,7 +66,7 @@ impl Lowering<'_> {
                     .clone()
                     .or_else(|| (!declares).then(|| self.declared_type(id, &name)).flatten());
                 let runtime_initializer = match *initializer {
-                    Some(expr) => (fold(self.ast, expr) == Value::Unevaluated).then(|| {
+                    Some(expr) => (!fold(self.ast, expr).is_constant()).then(|| {
                         self.builder
                             .lower_initializer(owner, name.clone(), declared_type, expr, *location)
                     }),
@@ -116,7 +116,11 @@ impl Lowering<'_> {
                     procedure.previous = Some(previous);
                 }
 
-                self.index.set_body(id, name, body.as_ref().map(|_| proc));
+                // `/obj/thing/update_icon()` with no statements still replaces the parent's proc, a body-less
+                // `proc/` declaration is a prelude stub the vm implements
+                let is_override = !path.flags.intersects(PathFlags::IS_PROC | PathFlags::IS_VERB);
+                let body = (body.is_some() || is_override).then_some(proc);
+                self.index.set_body(id, name, body);
             },
 
             Declaration::Override { name, value, location } => {
@@ -129,7 +133,7 @@ impl Lowering<'_> {
                 };
 
                 let declared_type = self.declared_type(id, name);
-                let runtime_initializer = (fold(self.ast, *value) == Value::Unevaluated).then(|| {
+                let runtime_initializer = (!fold(self.ast, *value).is_constant()).then(|| {
                     self.builder
                         .lower_initializer(prefix.clone(), name.clone(), declared_type, *value, *location)
                 });

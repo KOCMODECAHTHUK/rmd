@@ -262,6 +262,7 @@ pub struct Bake {
     pub appearances: HashMap<u64, SharedAppearance>,
     pub lighting: Option<LightingMap>,
     pub diagnostics: Diagnostics,
+    pub ui_fault: Option<Fault>,
     pub attempted: usize,
     pub succeeded: usize,
     pub cache_hits: usize,
@@ -507,10 +508,15 @@ impl Bake {
         };
 
         let target = target.and_then(|id| self.objects.get(&id).copied());
+        let frame = self
+            .runtime
+            .ui_frame(tree, module, proc, target, dockspace, feedback, self.limits);
+        self.ui_fault = frame.as_ref().err().cloned();
 
-        self.runtime
-            .ui_frame(tree, module, proc, target, dockspace, feedback, self.limits)
+        frame
     }
+
+    pub fn hook_of(&self, fault: &Fault) -> Option<ProfileHook> { self.profile.hook_of(fault.outermost_proc_id()?) }
 
     pub fn take_output(&mut self) -> Vec<String> { self.runtime.take_output() }
 
@@ -588,9 +594,11 @@ impl Bake {
                 .get(id)
                 .is_some_and(|atom| base.is_some_and(|base| tree.is_subtype_of(atom.ty, base)))
         };
+
+        // BYOND stacks a tile's turfs in map order and keeps the top one as the turf
         let turf = ids
             .iter()
-            .find(|id| subtype(id, tree.roots().turf))
+            .rfind(|id| subtype(id, tree.roots().turf))
             .and_then(|id| self.objects.get(id))
             .copied();
         let area = ids
@@ -611,7 +619,7 @@ impl Bake {
 
         for id in ids {
             if let Some(object) = self.objects.get(&id).copied() {
-                let loc = if Some(object) == area {
+                let loc = if Some(object) == area || subtype(&id, tree.roots().turf) && Some(object) != turf {
                     None
                 } else if Some(object) == turf {
                     area
@@ -1543,10 +1551,7 @@ impl Runtime {
     fn connection_endpoints(
         &mut self, tree: &ObjectTree, module: &Module, proc: ProcId, object: ObjectId, limits: Limits,
     ) -> Result<Vec<ConnectionEndpoint>, Fault> {
-        self.ensure_global().map_err(|fault| Fault {
-            proc: Some(proc),
-            ..fault
-        })?;
+        self.ensure_global().map_err(|fault| fault.entering(module, proc))?;
 
         let profile = self.profile;
         self.heap.begin();
@@ -1606,10 +1611,7 @@ impl Runtime {
         &mut self, tree: &ObjectTree, module: &Module, proc: ProcId, target: Option<ObjectId>, dockspace: u32,
         feedback: crate::ui::Feedback, limits: Limits,
     ) -> Result<crate::ui::Frame, Fault> {
-        self.ensure_global().map_err(|fault| Fault {
-            proc: Some(proc),
-            ..fault
-        })?;
+        self.ensure_global().map_err(|fault| fault.entering(module, proc))?;
 
         let profile = self.profile;
         let interacted = feedback.interacted;
@@ -1641,10 +1643,7 @@ impl Runtime {
         &mut self, tree: &ObjectTree, module: &Module, proc: ProcId, object: ObjectId, position: Position,
         size: [i32; 3], limits: Limits,
     ) -> Result<Vec<Highlight>, Fault> {
-        self.ensure_global().map_err(|fault| Fault {
-            proc: Some(proc),
-            ..fault
-        })?;
+        self.ensure_global().map_err(|fault| fault.entering(module, proc))?;
 
         let profile = self.profile;
         self.heap.begin();
@@ -1705,10 +1704,7 @@ impl Runtime {
     fn preview(
         &mut self, tree: &ObjectTree, module: &Module, proc: ProcId, object: ObjectId, instance: u64, limits: Limits,
     ) -> Result<Preview, Fault> {
-        self.ensure_global().map_err(|fault| Fault {
-            proc: Some(proc),
-            ..fault
-        })?;
+        self.ensure_global().map_err(|fault| fault.entering(module, proc))?;
 
         let profile = self.profile;
         self.heap.begin();

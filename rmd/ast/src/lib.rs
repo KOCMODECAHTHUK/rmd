@@ -1,5 +1,5 @@
 use core::{
-    location::Location,
+    location::{LineTable, Location, SourceLine},
     path::TreePath,
     types::{Identifier, VarModifiers},
 };
@@ -26,6 +26,7 @@ impl ExpressionId {
 pub struct AST {
     pub declarations: Vec<Declaration>,
     pub expressions: Vec<Expression>,
+    pub expression_lines: LineTable<ExpressionId>,
 }
 
 impl AST {
@@ -33,10 +34,15 @@ impl AST {
         Self {
             declarations,
             expressions,
+            expression_lines: LineTable::default(),
         }
     }
 
     pub fn get_expr(&self, expr_id: ExpressionId) -> Option<&Expression> { self.expressions.get(expr_id.index()) }
+
+    pub fn expression_line_near(&self, expr_id: ExpressionId, hint: &mut usize) -> Option<SourceLine> {
+        self.expression_lines.get_near(expr_id, hint)
+    }
 }
 
 #[derive(Debug, Clone)]

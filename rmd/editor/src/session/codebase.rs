@@ -251,6 +251,8 @@ impl Session {
 
         let report = report(&environment, &diagnostics);
         self.diagnostics = diagnostics;
+        self.logged_faults.clear();
+        self.logged_ui_fault = None;
         self.textures = textures;
         self.type_thumbnails = thumbnails;
         self.standalone.clear();

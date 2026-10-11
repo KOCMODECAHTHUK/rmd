@@ -177,6 +177,19 @@ impl Environment {
         self.bake_files.get(id.0 as usize).map(PathBuf::as_path)
     }
 
+    pub fn relative_bake_file(&self, id: core::location::FileId) -> Option<&Path> {
+        let path = self.bake_file(id)?;
+
+        Some(path.strip_prefix(self.base_dir()).unwrap_or(path))
+    }
+
+    pub fn fault_fault_report(&self, fault: &vm::Fault) -> String {
+        match &self.bake_program {
+            Some(program) => fault.format_fault_report(&program.module, |file| self.relative_bake_file(file)),
+            None => fault.to_string(),
+        }
+    }
+
     pub fn icon(&self, name: &str) -> Option<&Metadata> { self.icons.get(name) }
 
     /// `'icons/obj/items.dmi'`
@@ -230,7 +243,7 @@ impl Environment {
             program.icon_states = vm::IconStates::new(self.icons.iter().map(|(name, metadata)| {
                 let states = metadata.states.iter().map(|state| state.name.clone()).collect();
 
-                (name.clone(), states)
+                (name.clone(), states, [metadata.width, metadata.height])
             }));
         }
 

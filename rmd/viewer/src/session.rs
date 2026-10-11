@@ -85,6 +85,11 @@ impl Session {
                 bake.succeeded,
                 bake.diagnostics.count()
             );
+            if let Some(environment) = &self.environment {
+                for entry in bake.diagnostics.entries.iter().filter(|entry| entry.count > 0) {
+                    eprintln!("{}x {}", entry.count, environment.fault_fault_report(&entry.fault));
+                }
+            }
         }
         let instances = self.environment.as_ref().map(|environment| {
             frame::build_with_options(

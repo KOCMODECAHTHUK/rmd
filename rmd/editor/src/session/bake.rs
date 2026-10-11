@@ -4,6 +4,7 @@ use editor::{
     frame::{self, FrameRenderOptions, PrefabUpdate},
 };
 use render::FrameUpdate;
+use vm::profile::ProfileHook;
 
 use super::{Session, always_highlighted};
 use crate::baker::{self, Baked, Job};
@@ -25,6 +26,13 @@ pub(super) fn report_bake_output(bake: &mut editor::bake::Bake) {
     }
 }
 
+pub(crate) struct RuntimeFault<'a> {
+    /// `None` for faults outside any hook, like a map var that is not a constant
+    pub hook: Option<ProfileHook>,
+    pub fault: &'a vm::Fault,
+    pub count: usize,
+}
+
 impl Session {
     fn collect_bake_diagnostics(&mut self) {
         self.diagnostics.bake = self
@@ -35,6 +43,16 @@ impl Session {
             .filter(|entry| entry.count > 0)
             .cloned()
             .collect();
+
+        let Some(environment) = &self.state.environment else {
+            return;
+        };
+
+        for entry in &self.diagnostics.bake {
+            if self.logged_faults.insert(entry.fault.key()) {
+                log::warn!("DM: {}", environment.fault_fault_report(&entry.fault));
+            }
+        }
     }
 
     pub(super) fn rebake_all(&mut self) {
@@ -240,6 +258,36 @@ impl Session {
     }
 
     pub fn bake_view(&self) -> Option<crate::loader::LoadView> { self.baker.view() }
+
+    /// Faiults __PER MAP__, keep this in mind: setup faults first and then by hook
+    pub(crate) fn runtime_faults(&self) -> Vec<(DocumentId, Vec<RuntimeFault<'_>>)> {
+        self.state
+            .document_ids()
+            .into_iter()
+            .filter_map(|id| {
+                let bake = self.caches.get(&id)?.bake.as_ref()?;
+                let mut faults = bake
+                    .diagnostics
+                    .entries
+                    .iter()
+                    .filter(|entry| entry.count > 0)
+                    .map(|entry| RuntimeFault {
+                        hook: bake.hook_of(&entry.fault),
+                        fault: &entry.fault,
+                        count: entry.count,
+                    })
+                    .chain(bake.ui_fault.iter().map(|fault| RuntimeFault {
+                        hook: Some(ProfileHook::Ui),
+                        fault,
+                        count: 1,
+                    }))
+                    .collect::<Vec<_>>();
+                faults.sort_by_key(|fault| fault.hook.map_or(0, |hook| hook as usize + 1));
+
+                (!faults.is_empty()).then_some((id, faults))
+            })
+            .collect()
+    }
 
     pub(super) fn apply_bake_update(&mut self, id: DocumentId, bake_update: editor::bake::BakeUpdate) {
         let Self {

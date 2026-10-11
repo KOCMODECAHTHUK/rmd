@@ -1,10 +1,10 @@
 use core::{
-    location::Location,
+    location::{Location, SourceLine},
     path::TreePath,
-    types::{Identifier, ListEntry, Value, VarModifiers, VarSpec},
+    types::{Identifier, InputType, ListEntry, Value, VarModifiers, VarSpec},
 };
 
-use ast::{AST, Expression, ExpressionId, ForLoop, Literal, Statement};
+use ast::{AST, AccessKind, Expression, ExpressionId, ForLoop, Literal, Statement};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::*;
@@ -41,6 +41,8 @@ pub struct IrModuleBuilder<'a> {
     current_owner: TreePath,
     locals_in_memory: bool,
     depth: usize,
+    line: Option<SourceLine>,
+    line_hint: usize,
 }
 
 #[derive(Clone, PartialEq, Eq, Hash)]
@@ -102,6 +104,8 @@ impl<'a> IrModuleBuilder<'a> {
             current_owner: TreePath::default(),
             locals_in_memory: false,
             depth: 0,
+            line: None,
+            line_hint: 0,
         }
     }
 
@@ -141,6 +145,9 @@ impl<'a> IrModuleBuilder<'a> {
 
     pub fn finish_with_optimizations(mut self, enabled: bool) -> (Module, opt::OptimizationTimings) {
         self.link_global_function_calls();
+        // nodes the optimizer adds have no source
+        let end = IrNodeId(self.module.nodes.len() as u32);
+        self.module.node_lines.push(end, None);
         // raw lowering can leave instructions after a terminating operation
         crate::opt::canonicalize_terminators(&mut self.module);
         // blocks made unreachable by terminator canonicalization can still refer to instructions
@@ -303,6 +310,7 @@ impl<'a> IrModuleBuilder<'a> {
     fn make_node(&mut self, node: IrNode) -> IrNodeId {
         let id = IrNodeId(self.module.nodes.len() as u32);
         self.module.nodes.push(node);
+        self.module.node_lines.push(id, self.line);
 
         id
     }
@@ -637,6 +645,64 @@ impl<'a> IrModuleBuilder<'a> {
 
     fn undefined(&mut self) -> IrNodeId { self.intern_constant(Value::Null) }
 
+    /// `issaved(A.b)` and `issaved(A.vars[name])` ask about a var, not its value, so the call gets
+    /// the var's owner and its name
+    fn issaved_operands(&mut self, expression: ExpressionId) -> Option<(IrNodeId, IrNodeId)> {
+        match self.ast.get_expr(expression)? {
+            Expression::Field { object, name, .. } => {
+                let (object, name) = (*object, name.clone());
+                let owner = self.lower_expr(object);
+
+                Some((owner, self.intern_constant(Value::Text(name.to_string()))))
+            },
+            Expression::Index { object, index, .. } => {
+                let Some(Expression::Field { object, name, .. }) = self.ast.get_expr(*object) else {
+                    return None;
+                };
+                if name.as_str() != "vars" {
+                    return None;
+                }
+
+                let (object, index) = (*object, *index);
+                let owner = self.lower_expr(object);
+
+                Some((owner, self.lower_expr(index)))
+            },
+            Expression::Identifier(name) if self.lookup(name).is_none() => {
+                let name = name.to_string();
+                let owner = self.emit_instr(IrNode::Builtin(Builtin::Src));
+
+                Some((owner, self.intern_constant(Value::Text(name))))
+            },
+            _ => None,
+        }
+    }
+
+    /// `text("[] of []", count, name)`
+    /// similar to format!("{}", "foo") => "foo"
+    fn variadic_text(&mut self, args: &[ast::Argument]) -> Option<IrNodeId> {
+        let (format, rest) = args.split_first()?;
+        if format.key.is_some() || rest.iter().any(|argument| argument.key.is_some()) {
+            return None;
+        }
+
+        let Some(Expression::InterpString { chunks, expressions }) = self.ast.get_expr(format.value?) else {
+            return None;
+        };
+
+        let mut fills = rest.iter().map(|argument| argument.value);
+        let chunks = chunks.iter().map(|s| core::types::decode_string(s)).collect();
+        let values = expressions
+            .iter()
+            .map(|expression| match expression.or_else(|| fills.next().flatten()) {
+                Some(expression) => self.lower_expr(expression),
+                None => self.undefined(),
+            })
+            .collect();
+
+        Some(self.emit_instr(IrNode::Interpolate(Box::new(Interpolation { chunks, values }))))
+    }
+
     fn add_phi_operands(&mut self, var: BindingId, phi: IrNodeId) {
         let Some(block) = self.phi_block.get(&phi).copied() else {
             return;
@@ -761,7 +827,11 @@ impl<'a> IrModuleBuilder<'a> {
         }
 
         self.depth += 1;
+        let outer = self.line;
+        self.line = self.ast.expression_line_near(id, &mut self.line_hint).or(outer);
         let value = self.lower_expr_inner(id);
+        // a statement's own nodes, like the branch on its condition, take its last expression's line
+        self.line = outer.or(self.line);
         self.depth -= 1;
 
         value
@@ -780,6 +850,13 @@ impl<'a> IrModuleBuilder<'a> {
                     Literal::String(s) => Value::Text(core::types::decode_string(s)),
                     Literal::Resource(s) => Value::Resource(s.clone()),
                 });
+            },
+            Some(Expression::Identifier(name)) if name.as_str() == "__TYPE__" => {
+                let owner = self.current_owner.clone();
+                return match owner == TreePath::default() {
+                    true => self.undefined(),
+                    false => self.intern_constant(Value::Path(owner)),
+                };
             },
             Some(Expression::Identifier(name)) => match (self.lookup(name), self.current_block) {
                 (Some(var), Some(block)) => return self.read_variable(var, block),
@@ -889,6 +966,19 @@ impl<'a> IrModuleBuilder<'a> {
                     return self.intern_constant(Value::Text(name));
                 }
 
+                if !args.is_empty()
+                    && let Some(Expression::Field { object, name, access }) = self.ast.get_expr(*callee)
+                    && matches!(access, AccessKind::SafeDot | AccessKind::SafeColon)
+                {
+                    return self.safe_call(*object, name.clone(), *access, args);
+                }
+
+                if matches!(self.ast.get_expr(*callee), Some(Expression::Identifier(name)) if name.as_str() == "text")
+                    && let Some(format) = self.variadic_text(args)
+                {
+                    return format;
+                }
+
                 if matches!(self.ast.get_expr(*callee), Some(Expression::Identifier(name)) if name.as_str() == "initial")
                     && let [argument] = args.as_slice()
                     && let Some(value) = argument.value
@@ -938,6 +1028,26 @@ impl<'a> IrModuleBuilder<'a> {
                         }
                     },
                     false if let Some(function) = self.call_target(*callee) => {
+                        if matches!(self.ast.get_expr(*callee), Some(Expression::Identifier(name)) if name.as_str() == "issaved")
+                            && let [argument] = args.as_slice()
+                            && let Some(value) = argument.value
+                            && let Some((owner, name)) = self.issaved_operands(value)
+                        {
+                            return self.emit_instr(IrNode::FunctionCall {
+                                function,
+                                args: vec![
+                                    Argument {
+                                        key: None,
+                                        value: Some(owner),
+                                    },
+                                    Argument {
+                                        key: None,
+                                        value: Some(name),
+                                    },
+                                ],
+                            });
+                        }
+
                         let mut lowered = self.args(args);
                         if matches!(self.ast.get_expr(*callee), Some(Expression::Identifier(name)) if name.as_str() == "istype")
                             && args.len() == 1
@@ -1066,6 +1176,48 @@ impl<'a> IrModuleBuilder<'a> {
         self.read_variable(temp, merge)
     }
 
+    /// `a?.b(c)` evaluates `c` and calls `b` only when `a` is not null
+    fn safe_call(
+        &mut self, object: ExpressionId, name: Identifier, access: AccessKind, args: &[ast::Argument],
+    ) -> IrNodeId {
+        let temp = self.declare_temp("$safe_call");
+        let object = self.lower_expr(object);
+        let null = self.undefined();
+        let Some(block) = self.current_block else {
+            return null;
+        };
+        self.write_variable(temp, block, null);
+
+        let is_present = self.emit_instr(IrNode::Binary {
+            op: BinaryOp::CompNotEq,
+            lhs: object,
+            rhs: null,
+        });
+        let call = self.make_block();
+        let merge = self.make_block();
+        self.selection_merge(merge);
+        self.terminate_current_block(IrNode::ConditionalBranch {
+            condition: is_present,
+            true_block: call,
+            false_block: merge,
+        });
+        self.seal_block(call);
+
+        self.set_current_block(call);
+        let callee = self.emit_instr(IrNode::AccessField { object, name, access });
+        let args = self.args(args);
+        let value = self.emit_instr(IrNode::Call { callee, args });
+        if let Some(block) = self.current_block {
+            self.write_variable(temp, block, value);
+        }
+        self.terminate_current_block(IrNode::Branch(merge));
+
+        self.seal_block(merge);
+        self.set_current_block(merge);
+
+        self.read_variable(temp, merge)
+    }
+
     fn ternary(&mut self, condition: ExpressionId, true_expr: ExpressionId, false_expr: ExpressionId) -> IrNodeId {
         let temp = self.declare_temp("$ternary");
         let condition = self.lower_expr(condition);
@@ -1132,6 +1284,11 @@ impl<'a> IrModuleBuilder<'a> {
             {
                 self.defer_new_type(value, name)
             },
+            Some(Expression::Field { object, name, .. })
+                if matches!(self.ast.get_expr(*object), Some(Expression::Builtin(Builtin::Global))) =>
+            {
+                self.defer_new_type_in(value, name, TreePath::default())
+            },
             _ => None,
         };
         self.set_new_type(value, inferred);
@@ -1140,9 +1297,13 @@ impl<'a> IrModuleBuilder<'a> {
     }
 
     fn defer_new_type(&mut self, value: IrNodeId, name: &Identifier) -> Option<TreePath> {
+        self.defer_new_type_in(value, name, self.current_owner.clone())
+    }
+
+    fn defer_new_type_in(&mut self, value: IrNodeId, name: &Identifier, owner: TreePath) -> Option<TreePath> {
         if matches!(self.module.node(value), Some(IrNode::New { ty: None, .. })) {
             self.unresolved_new.push(UnresolvedNew {
-                owner: self.current_owner.clone(),
+                owner,
                 name: name.clone(),
                 node: value,
             });
@@ -1257,6 +1418,7 @@ impl<'a> IrModuleBuilder<'a> {
     }
 
     fn lower_stmt(&mut self, stmt: &Statement, label: Option<&Identifier>) {
+        self.line = None;
         match stmt {
             Statement::Empty | Statement::Setting { .. } if !is_waitfor(stmt) => {},
             Statement::Setting { .. } => {
@@ -1435,8 +1597,11 @@ impl<'a> IrModuleBuilder<'a> {
                 self.seal_block(merge);
                 self.resume(merge);
             },
-            Statement::Spawn { .. } => {
-                self.emit_instr(IrNode::Blocked("spawn"));
+            // the bake is a snapshot taken before any spawned work runs
+            Statement::Spawn { delay, .. } => {
+                if let Some(delay) = delay {
+                    self.lower_expr(*delay);
+                }
             },
             Statement::TryCatch {
                 try_body,
@@ -1670,7 +1835,13 @@ impl<'a> IrModuleBuilder<'a> {
         };
         let value_var = self.binding(value);
         let key_var = key.as_ref().map(|key| self.binding(key));
-        let ty = value.spec.var_type.clone();
+        // `for(var/obj/O as anything in L)` keeps every entry, not only the objs
+        let is_unfiltered = value
+            .spec
+            .as_type
+            .as_ref()
+            .is_some_and(|spec| spec.flags.contains(InputType::ANYTHING));
+        let ty = value.spec.var_type.clone().filter(|_| !is_unfiltered);
         let iterator = self.emit_instr(IrNode::IterInit {
             list,
             ty: ty.map(Box::new),

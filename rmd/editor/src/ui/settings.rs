@@ -923,28 +923,6 @@ fn draw_compiler_settings(
 
     let retained = session.diagnostics.bake.iter().map(|entry| entry.count).sum::<usize>();
     ui.text(format!("{retained} atoms retained their static appearance"));
-    if retained == 0 {
-        return;
-    }
-
-    let Some(_tree) = ui.tree_node("Bake diagnostics") else {
-        return;
-    };
-
-    for diagnostic in &session.diagnostics.bake {
-        let fault = &diagnostic.fault;
-        let file = session
-            .state
-            .environment
-            .as_ref()
-            .and_then(|environment| environment.bake_file(fault.location.file));
-        ui.text_wrapped(format!(
-            "{} atoms: {:?} at {}",
-            diagnostic.count,
-            fault.kind,
-            fault.location.display(file)
-        ));
-    }
 }
 
 fn draw_optimization_settings(ui: &Ui, session: &Session, settings: &mut Settings) {

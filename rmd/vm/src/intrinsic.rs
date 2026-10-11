@@ -116,21 +116,18 @@ impl Evaluator<'_> {
             Intrinsic::DmNewIcon => Ok(arg(0)),
             Intrinsic::Block => self.block(&positional()),
             Intrinsic::Range | Intrinsic::Orange => self.range_list([arg(0), arg(1)], intrinsic == Intrinsic::Range),
-            Intrinsic::IconStates => {
-                let mut icon = arg(0);
-                for _ in 0..8 {
-                    let GenericValue::Object(id) = icon else {
-                        break;
-                    };
-                    icon = self
-                        .runtime
-                        .heap
-                        .object(id)
-                        .and_then(|object| object.vars.get(&Identifier::from(vars::ICON)))
-                        .cloned()
-                        .unwrap_or_default();
+            Intrinsic::DmIconSize => {
+                let icon = self.icon_file(arg(0));
+                let size = match &icon {
+                    GenericValue::Resource(path) | GenericValue::Text(path) => self.runtime.icons.size(path),
+                    _ => None,
                 }
+                .ok_or_else(|| self.fault(FaultKind::Unsupported(format!("size of icon {}", icon.display()))))?;
 
+                Ok((size[usize::from(self.number(&arg(1))? == 2.0)] as f32).into())
+            },
+            Intrinsic::IconStates => {
+                let icon = self.icon_file(arg(0));
                 let states = match &icon {
                     GenericValue::Resource(path) | GenericValue::Text(path) => {
                         self.runtime.icons.get(path).map(<[_]>::to_vec).unwrap_or_default()
@@ -204,7 +201,6 @@ impl Evaluator<'_> {
             | Intrinsic::DmIconScale
             | Intrinsic::DmIconCrop
             | Intrinsic::DmIconGetPixel
-            | Intrinsic::DmIconSize
             | Intrinsic::DmDatabase
             | Intrinsic::MakeGenerator => Err(self.fault(FaultKind::Blocked(name.into()))),
 
@@ -494,7 +490,7 @@ impl Evaluator<'_> {
 
             Intrinsic::Image | Intrinsic::MutableAppearance => self.appearance_object(intrinsic, None, params, args),
             Intrinsic::ImageNew => self.appearance_object(intrinsic, receiver.object(), params, args),
-            Intrinsic::Issaved => Ok(true.into()),
+            Intrinsic::Issaved => Ok(self.is_saved(&arg(0), &arg(1)).into()),
 
             Intrinsic::FcopyRsc => Ok(arg(0)),
 
@@ -559,6 +555,11 @@ impl Evaluator<'_> {
                 self.list(entries)
             },
 
+            Intrinsic::Isfile => Ok(matches!(arg(0), GenericValue::Resource(_)).into()),
+            Intrinsic::Text => match arg(0) {
+                text @ GenericValue::Text(_) => Ok(text),
+                value => self.text(value.display()),
+            },
             Intrinsic::Isnull => Ok(matches!(arg(0), GenericValue::Null).into()),
             Intrinsic::Isnum => Ok(matches!(arg(0), GenericValue::Num(_)).into()),
             Intrinsic::Istext => Ok(matches!(arg(0), GenericValue::Text(_)).into()),
@@ -1206,7 +1207,6 @@ impl Evaluator<'_> {
             | Intrinsic::Hearers
             | Intrinsic::HtmlDecode
             | Intrinsic::HtmlEncode
-            | Intrinsic::Isfile
             | Intrinsic::Ispointer
             | Intrinsic::JsonEncode
             | Intrinsic::Lentext
@@ -1246,7 +1246,6 @@ impl Evaluator<'_> {
             | Intrinsic::Step
             | Intrinsic::StepTo
             | Intrinsic::StepTowards
-            | Intrinsic::Text
             | Intrinsic::Time2text
             | Intrinsic::UrlDecode
             | Intrinsic::UrlEncode
@@ -1267,6 +1266,49 @@ impl Evaluator<'_> {
             | Intrinsic::Winexists
             | Intrinsic::Winshow => Err(self.fault(FaultKind::Blocked(name.into()))),
         }
+    }
+
+    /// The file behind an `/icon` datum, or the value itself
+    pub(crate) fn icon_file(&self, mut icon: GenericValue) -> GenericValue {
+        for _ in 0..8 {
+            let GenericValue::Object(id) = icon else {
+                break;
+            };
+            icon = self
+                .runtime
+                .heap
+                .object(id)
+                .and_then(|object| object.vars.get(&Identifier::from(vars::ICON)))
+                .cloned()
+                .unwrap_or_default();
+        }
+
+        icon
+    }
+
+    /// https://ref.dm-lang.org/proc/issaved
+    /// This returns 1 if the given variable should be automatically saved when writing an object to a savefile and 0
+    /// otherwise. Variables which are not global, const, or tmp will return 1.
+    fn is_saved(&self, owner: &GenericValue, name: &GenericValue) -> bool {
+        let Some(name) = name.text() else {
+            return true;
+        };
+
+        if matches!(name, vars::TYPE | vars::PARENT_TYPE | vars::VARS) {
+            return false;
+        }
+
+        let ty = match owner {
+            GenericValue::Object(id) => self.runtime.heap.object(*id).map(|object| object.ty),
+            GenericValue::Path(path) => self.tree.id_of(path),
+            _ => None,
+        };
+        let Some((_, variable)) = ty.and_then(|ty| self.tree.var_declaration(ty, &Identifier::from(name))) else {
+            return true;
+        };
+
+        let modifiers = variable.modifiers;
+        !(modifiers.is_global || modifiers.is_static || modifiers.is_const || modifiers.is_tmp)
     }
 
     fn construct(

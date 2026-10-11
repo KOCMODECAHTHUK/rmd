@@ -31,7 +31,7 @@ impl Session {
 
         match drawn {
             Ok(frame) => {
-                self.ui_fault = None;
+                self.logged_ui_fault = None;
                 if frame.committed {
                     for other in self.state.document_ids() {
                         if other != id {
@@ -45,9 +45,12 @@ impl Session {
                 frame
             },
             Err(fault) => {
-                if self.ui_fault.as_ref() != Some(&fault.kind) {
-                    log::warn!("demir_ui: {fault}");
-                    self.ui_fault = Some(fault.kind);
+                let key = fault.key();
+                if self.logged_ui_fault.as_ref() != Some(&key) {
+                    if let Some(environment) = &self.state.environment {
+                        log::warn!("DM ui(): {}", environment.fault_fault_report(&fault));
+                    }
+                    self.logged_ui_fault = Some(key);
                 }
 
                 editor::bake::UiFrame::default()
@@ -147,10 +150,11 @@ mod tests {
 
     use dmm::{Coord, Map, Prefab, Size};
     use editor::document::{DocumentId, MapDocument, PrefabInstanceId};
+    use vm::profile::ProfileHook;
 
     use crate::session::{
         Session,
-        fixtures::{examples, settle_bake},
+        fixtures::{examples, faulting_profile_session, settle_bake},
     };
 
     fn panel_session() -> Session {
@@ -254,5 +258,22 @@ mod tests {
             "a bake that lands later catches up without ever being active",
         );
         assert!(session.caches[&late].pending_rebake.is_empty());
+    }
+
+    #[test]
+    fn ui_and_bake_faults_are_listed_with_their_hook_and_line() {
+        let (mut session, id) = faulting_profile_session();
+        session.dm_ui(0, editor::bake::UiFeedback::default());
+
+        let maps = session.runtime_faults();
+        let [(document, faults)] = maps.as_slice() else {
+            panic!("one map has faults");
+        };
+        assert_eq!(*document, id);
+        let listed = faults
+            .iter()
+            .map(|fault| (fault.hook, fault.fault.location.begin.line))
+            .collect::<Vec<_>>();
+        assert_eq!(listed, [(Some(ProfileHook::Bake), 6), (Some(ProfileHook::Ui), 9)]);
     }
 }

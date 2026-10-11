@@ -227,6 +227,8 @@ pub enum ListKind {
     #[default]
     List,
     Alist,
+    /// `D.vars`, whose indexes read and write `D`'s own vars
+    Vars(ObjectId),
 }
 
 #[derive(Debug, Clone, Default)]
