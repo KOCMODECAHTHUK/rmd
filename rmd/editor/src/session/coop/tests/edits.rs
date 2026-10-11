@@ -282,6 +282,7 @@ fn edits_queued_for_one_poll_apply_as_one_remote_edit() {
             patch: dmm::writer::write(&patch),
             level: None,
             seen: net::SeqId(0),
+            level_id: 0,
         }
     };
     for (seq, by, tiles) in [
@@ -738,7 +739,12 @@ fn a_deletion_asked_for_before_a_peers_lands_is_rebased_past_it() {
     }
 }
 
-// a copy of a map someone else shares, levels 1 to 3 topped with nothing, /obj/two and /obj/three
+// levels 1 to 3 topped with nothing, /obj/two and /obj/three
+const THREE_LEVELS: &[u8] =
+    b"\"a\" = (/turf,/area)\n\"b\" = (/obj/two,/turf,/area)\n\"c\" = (/obj/three,/turf,/area)\n\n\
+    (1,1,1) = {\"\naa\n\"}\n(1,1,2) = {\"\nbb\n\"}\n(1,1,3) = {\"\ncc\n\"}\n";
+
+// a copy of a map someone else shares, see `THREE_LEVELS`
 fn three_level_copy(name: &str) -> (PathBuf, Session, PathBuf) {
     let (dir, mut session) = hosting(name);
     let path = "_maps/a.dmm";
@@ -749,9 +755,7 @@ fn three_level_copy(name: &str) -> (PathBuf, Session, PathBuf) {
         Event::MapSnapshot {
             path: String::from(path),
             generation: GenerationId(1),
-            bytes: b"\"a\" = (/turf,/area)\n\"b\" = (/obj/two,/turf,/area)\n\"c\" = (/obj/three,/turf,/area)\n\n\
-                    (1,1,1) = {\"\naa\n\"}\n(1,1,2) = {\"\nbb\n\"}\n(1,1,3) = {\"\ncc\n\"}\n"
-                .to_vec(),
+            bytes: THREE_LEVELS.to_vec(),
         },
         Some(&dir),
     );
@@ -791,6 +795,7 @@ fn level_edit(seen: u32, tiles: &[([u32; 3], &str)], level: Option<LevelOp>) -> 
         },
         level,
         seen: SeqId(seen),
+        level_id: 0,
     }
 }
 
@@ -938,6 +943,84 @@ fn a_new_generation_drops_an_unsent_deletion_but_keeps_an_unsent_level() {
     for dir in [host_dir, guest_dir] {
         let _ = fs::remove_dir_all(dir);
     }
+}
+
+#[test]
+fn a_carried_level_change_of_ours_leaves_a_newer_request_queued() {
+    let (dir, mut session, file) = three_level_copy("level-carried-echo");
+    let path = "_maps/a.dmm";
+    let id = session.state.document_for_path(&file).unwrap();
+    let you = session.coop().unwrap().you.unwrap();
+    assert_eq!(session.delete_level(id, 2), Ok(()));
+    session.poll_coop();
+
+    // the server carries our sent deletion into the next share
+    let coop = session.coop.as_mut().unwrap();
+    coop.apply(
+        Event::MapShared {
+            path: String::from(path),
+            by: OTHER,
+            generation: GenerationId(2),
+        },
+        Some(&dir),
+    );
+    session.set_level_of(id, 3);
+    assert_eq!(session.create_level(id, &plain_fill()), Ok(4));
+
+    let delete = Some(LevelOp::Delete(DeleteLevel { z: 2 }));
+    let coop = session.coop.as_mut().unwrap();
+    coop.apply(
+        Event::MapSnapshot {
+            path: String::from(path),
+            generation: GenerationId(2),
+            bytes: THREE_LEVELS.to_vec(),
+        },
+        Some(&dir),
+    );
+    coop.apply(
+        Event::Edit {
+            by: you,
+            seq: SeqId(0),
+            edit: net::MapEdit {
+                generation: GenerationId(2),
+                level_id: 1,
+                ..level_edit(0, &[], delete)
+            },
+        },
+        Some(&dir),
+    );
+    poll_until(&mut [&mut session], |sessions| {
+        sessions[0].coop().unwrap().shared_maps[path].is_ready()
+    });
+
+    let id = session.state.document_for_path(&file).unwrap();
+    assert_eq!(levels(&session, id), 2);
+    assert!(
+        session.is_coop_level_requested(id),
+        "the carried deletion doesn't answer the new level"
+    );
+
+    let append = Some(LevelOp::Insert(InsertLevel {
+        at: InsertAt::Top,
+        contents: LevelContents::Fill(editor::patch::encode_tile(&plain_fill())),
+    }));
+    deliver_edits(
+        &mut session,
+        &dir,
+        vec![(
+            1,
+            you,
+            net::MapEdit {
+                generation: GenerationId(2),
+                level_id: 2,
+                ..level_edit(1, &[], append)
+            },
+        )],
+    );
+    assert_eq!(levels(&session, id), 3);
+    assert!(!session.is_coop_level_requested(id));
+
+    let _ = fs::remove_dir_all(dir);
 }
 
 fn level_ids(session: &Session, id: DocumentId, z: u32) -> Vec<dmm::PrefabInstanceId> {

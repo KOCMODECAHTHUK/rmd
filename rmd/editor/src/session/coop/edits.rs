@@ -46,13 +46,8 @@ impl Session {
                 continue;
             };
 
-            // answered even when it lost a race, a carried one after a new share has no request left
-            let step = is_ours.then(|| {
-                shared_map
-                    .level_request
-                    .take()
-                    .map_or(LevelStep::Change, |request| request.step())
-            });
+            // answered even when it lost a race
+            let step = is_ours.then(|| shared_map.answer_level_request(edit.level_id));
 
             // the second of two peers asking for the same append gets nothing, on every copy
             let Some(change) = shared_map.level_log.sequence(levels, seq, edit.seen, op) else {
@@ -317,6 +312,7 @@ impl Session {
                 *shared_map.in_flight.entry(*coord).or_insert(0) += 1;
             }
 
+            let level_id = level.as_ref().map_or(0, |(_, _, id)| *id);
             let edit = |coords: &[Coord], patch: String, level: Option<LevelOp>, seen: SeqId| MapEdit {
                 path: path.clone(),
                 generation,
@@ -324,18 +320,19 @@ impl Session {
                 patch,
                 level,
                 seen,
+                level_id,
             };
 
             // the level op is rebased past level changes that landed after it was asked for
             let now = shared_map.next_seq;
             let edits = match level {
-                Some((op, seen)) if seen != now && !coords.is_empty() => {
+                Some((op, seen, _)) if seen != now && !coords.is_empty() => {
                     vec![
                         edit(&coords, patch, None, now),
                         edit(&[], String::new(), Some(op), seen),
                     ]
                 },
-                Some((op, seen)) => vec![edit(&coords, patch, Some(op), seen)],
+                Some((op, seen, _)) => vec![edit(&coords, patch, Some(op), seen)],
                 None => vec![edit(&coords, patch, None, now)],
             };
 

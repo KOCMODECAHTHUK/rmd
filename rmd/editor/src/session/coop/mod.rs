@@ -231,21 +231,15 @@ pub(crate) struct SharedMap {
     in_flight: HashMap<Coord, u32>,
     // a level change we asked for, it happens for everyone once the server sends it back
     level_request: Option<LevelRequest>,
+    // kept across shares, so an op carried from an old one never answers a new request
+    last_level_id: u32,
     level_log: LevelLog,
 }
 
 enum LevelRequest {
     // the seq our copy was at when the op picked its z
     Queued(LevelOp, LevelStep, SeqId),
-    Sent(LevelStep),
-}
-
-impl LevelRequest {
-    fn step(&self) -> LevelStep {
-        match self {
-            Self::Queued(_, step, _) | Self::Sent(step) => *step,
-        }
-    }
+    Sent(LevelStep, u32),
 }
 
 // how our own level change lands in history once the server sends it back
@@ -268,6 +262,7 @@ impl SharedMap {
             next_seq: SeqId(0),
             in_flight: HashMap::new(),
             level_request: None,
+            last_level_id: 0,
             level_log: LevelLog::default(),
         }
     }
@@ -312,19 +307,32 @@ impl SharedMap {
         self.level_log = LevelLog::default();
     }
 
-    fn send_level_request(&mut self) -> Option<(LevelOp, SeqId)> {
+    fn send_level_request(&mut self) -> Option<(LevelOp, SeqId, u32)> {
         match self.level_request.take()? {
             LevelRequest::Queued(op, step, seen) => {
-                self.level_request = Some(LevelRequest::Sent(step));
+                self.last_level_id = self.last_level_id.wrapping_add(1);
+                self.level_request = Some(LevelRequest::Sent(step, self.last_level_id));
 
-                Some((op, seen))
+                Some((op, seen, self.last_level_id))
             },
-            LevelRequest::Sent(step) => {
-                self.level_request = Some(LevelRequest::Sent(step));
+            LevelRequest::Sent(step, id) => {
+                self.level_request = Some(LevelRequest::Sent(step, id));
 
                 None
             },
         }
+    }
+
+    // a carried or replayed op of ours answers nothing, it lands as a plain change
+    fn answer_level_request(&mut self, id: u32) -> LevelStep {
+        let step = match self.level_request {
+            Some(LevelRequest::Sent(step, sent)) if sent == id => step,
+            _ => return LevelStep::Change,
+        };
+
+        self.level_request = None;
+
+        step
     }
 }
 

@@ -109,6 +109,8 @@ pub struct MapEdit {
     pub level: Option<LevelOp>,
     /// the author's copy had every edit before this one, level changes from here on are rebased away
     pub seen: SeqId,
+    /// the author's number for `level`, so it can tell its answer from a carried or replayed one
+    pub level_id: u32,
 }
 
 pub const MAX_LEVELS: u32 = 255;
@@ -470,6 +472,7 @@ mod tests {
             patch: String::from("\"a\" = (/turf,/area)\n"),
             level: Some(LevelOp::Delete(DeleteLevel { z: 1 })),
             seen: SeqId(5),
+            level_id: 3,
         };
         round_trip(ClientMessage::Edit(MapEdit {
             level: Some(LevelOp::Insert(InsertLevel {

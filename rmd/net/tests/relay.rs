@@ -346,6 +346,7 @@ fn a_different_codebase_receives_only_a_rejection_even_with_cached_data() {
         patch: "edit".into(),
         level: None,
         seen: SeqId(0),
+        level_id: 0,
     });
     wait_for(&alice, |event| matches!(event, Event::Edit { .. }).then_some(()));
 
@@ -615,6 +616,7 @@ fn edits_reach_everyone_and_replay_for_late_joiners_until_the_map_is_shared_agai
         patch: String::from(patch),
         level: None,
         seen: SeqId(0),
+        level_id: 0,
     };
     bob.send_edit(edit(GenerationId(0), "stale"));
     bob.send_edit(edit(GenerationId(1), "fresh"));
@@ -690,6 +692,7 @@ fn anyone_can_stop_sharing_a_map_for_everyone() {
         patch: String::from("late"),
         level: None,
         seen: SeqId(0),
+        level_id: 0,
     });
     bob.send_comment(String::from("_maps/other.dmm"), 1, [0.0, 0.0], String::from("marker"));
     let events = collect_until(&alice, |event| matches!(event, Event::Comment(_)));
@@ -738,6 +741,7 @@ fn a_new_share_carries_the_edits_its_snapshot_missed() {
         patch: String::from(patch),
         level: None,
         seen: SeqId(0),
+        level_id: 0,
     };
     let next_edit = |client: &Client| {
         wait_for(client, |event| match event {
@@ -801,6 +805,7 @@ fn a_new_share_rebases_carried_edits_past_level_deletions() {
         patch: String::from(patch),
         level: None,
         seen: SeqId(seen),
+        level_id: 0,
     };
     let delete = |edit: MapEdit, z| MapEdit {
         level: Some(LevelOp::Delete(DeleteLevel { z })),
@@ -882,6 +887,7 @@ fn a_new_share_rebases_carried_edits_past_level_insertions() {
         patch: String::from("tiles"),
         level,
         seen: SeqId(seen),
+        level_id: 0,
     };
     let insert = |at| {
         Some(LevelOp::Insert(InsertLevel {
@@ -968,6 +974,7 @@ fn level_changes_take_comments_with_their_levels() {
         patch: String::new(),
         level: Some(LevelOp::Delete(DeleteLevel { z: 2 })),
         seen: SeqId(0),
+        level_id: 0,
     });
     let moved = wait_for(&alice, |event| match event {
         Event::Comment(comment) => Some(comment),
@@ -985,6 +992,7 @@ fn level_changes_take_comments_with_their_levels() {
             contents: LevelContents::Fill(String::new()),
         })),
         seen: SeqId(1),
+        level_id: 0,
     });
     for expected in [("on 1", 2), ("on 3", 3)] {
         let moved = wait_for(&alice, |event| match event {
@@ -1035,6 +1043,7 @@ fn heavy_traffic_both_ways_does_not_stall_the_session() {
             patch: "a".repeat(512 * 1024),
             level: None,
             seen: SeqId(0),
+            level_id: 0,
         });
     }
 
@@ -1066,6 +1075,7 @@ fn a_resync_sends_the_snapshot_and_the_numbered_log_again() {
         patch: String::from(patch),
         level: None,
         seen: SeqId(0),
+        level_id: 0,
     };
     bob.send_edit(edit("first"));
     bob.send_edit(edit("second"));
@@ -1132,6 +1142,7 @@ fn edits_and_snapshots_survive_a_lossy_link() {
             patch: patch.to_string(),
             level: None,
             seen: SeqId(0),
+            level_id: 0,
         });
     }
 
