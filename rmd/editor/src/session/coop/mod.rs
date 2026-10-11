@@ -235,14 +235,15 @@ pub(crate) struct SharedMap {
 }
 
 enum LevelRequest {
-    Queued(LevelOp, LevelStep),
+    // the seq our copy was at when the op picked its z
+    Queued(LevelOp, LevelStep, SeqId),
     Sent(LevelStep),
 }
 
 impl LevelRequest {
     fn step(&self) -> LevelStep {
         match self {
-            Self::Queued(_, step) | Self::Sent(step) => *step,
+            Self::Queued(_, step, _) | Self::Sent(step) => *step,
         }
     }
 }
@@ -289,14 +290,14 @@ impl SharedMap {
             self.generation = Some(generation);
             // an unsent append still applies, it lands on top of any map,
             // but other level changes picked their z on the old snapshot
-            let queued = self.level_request.take().filter(|request| {
-                matches!(
-                    request,
-                    LevelRequest::Queued(
-                        LevelOp::Insert(InsertLevel { at: InsertAt::Top, .. }),
-                        LevelStep::Change
-                    )
-                )
+            let queued = self.level_request.take().and_then(|request| match request {
+                // seqs start over with the new generation
+                LevelRequest::Queued(
+                    op @ LevelOp::Insert(InsertLevel { at: InsertAt::Top, .. }),
+                    LevelStep::Change,
+                    _,
+                ) => Some(LevelRequest::Queued(op, LevelStep::Change, SeqId(0))),
+                _ => None,
             });
             self.forget_edits();
             self.level_request = queued;
@@ -311,12 +312,12 @@ impl SharedMap {
         self.level_log = LevelLog::default();
     }
 
-    fn send_level_request(&mut self) -> Option<LevelOp> {
+    fn send_level_request(&mut self) -> Option<(LevelOp, SeqId)> {
         match self.level_request.take()? {
-            LevelRequest::Queued(op, step) => {
+            LevelRequest::Queued(op, step, seen) => {
                 self.level_request = Some(LevelRequest::Sent(step));
 
-                Some(op)
+                Some((op, seen))
             },
             LevelRequest::Sent(step) => {
                 self.level_request = Some(LevelRequest::Sent(step));

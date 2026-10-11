@@ -2,7 +2,7 @@ use std::{collections::BTreeMap, mem};
 
 use dmm::{Coord, Prefab};
 use editor::{document::DocumentId, patch};
-use net::{DeleteLevel, InsertAt, InsertLevel, LevelChange, LevelOp, MapEdit};
+use net::{DeleteLevel, InsertAt, InsertLevel, LevelChange, LevelOp, MapEdit, SeqId};
 
 use super::{LevelRequest, LevelStep};
 use crate::session::Session;
@@ -259,7 +259,7 @@ impl Session {
             return false;
         };
 
-        shared_map.level_request = Some(LevelRequest::Queued(op, step));
+        shared_map.level_request = Some(LevelRequest::Queued(op, step, shared_map.next_seq));
 
         true
     }
@@ -317,15 +317,32 @@ impl Session {
                 *shared_map.in_flight.entry(*coord).or_insert(0) += 1;
             }
 
+            let edit = |coords: &[Coord], patch: String, level: Option<LevelOp>, seen: SeqId| MapEdit {
+                path: path.clone(),
+                generation,
+                coords: coords.iter().map(|coord| [coord.x, coord.y, coord.z]).collect(),
+                patch,
+                level,
+                seen,
+            };
+
+            // the level op is rebased past level changes that landed after it was asked for
+            let now = shared_map.next_seq;
+            let edits = match level {
+                Some((op, seen)) if seen != now && !coords.is_empty() => {
+                    vec![
+                        edit(&coords, patch, None, now),
+                        edit(&[], String::new(), Some(op), seen),
+                    ]
+                },
+                Some((op, seen)) => vec![edit(&coords, patch, Some(op), seen)],
+                None => vec![edit(&coords, patch, None, now)],
+            };
+
             if let Some(client) = coop.client.as_ref() {
-                client.send_edit(MapEdit {
-                    path,
-                    generation,
-                    coords: coords.iter().map(|coord| [coord.x, coord.y, coord.z]).collect(),
-                    patch,
-                    level,
-                    seen: shared_map.next_seq,
-                });
+                for edit in edits {
+                    client.send_edit(edit);
+                }
             }
         }
     }

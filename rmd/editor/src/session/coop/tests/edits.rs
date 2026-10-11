@@ -703,6 +703,41 @@ fn racing_deletions_of_one_level_delete_it_once() {
     }
 }
 
+#[test]
+fn a_deletion_asked_for_before_a_peers_lands_is_rebased_past_it() {
+    let (host_dir, mut host, guest_dir, mut guest, host_id, guest_id) = shared_levels("level-delete-late");
+    assert_eq!(host.delete_level(host_id, 2), Ok(()));
+    assert_eq!(guest.delete_level(guest_id, 2), Ok(()));
+    host.poll_coop();
+
+    // the guest takes in the host's deletion before it sends its own
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let coop = guest.coop.as_mut().unwrap();
+    let mut events = Vec::new();
+    while !events.iter().any(|event| matches!(event, Event::Edit { .. })) {
+        assert!(Instant::now() < deadline, "timed out");
+        events.extend(coop.client.as_ref().unwrap().poll());
+        thread::sleep(Duration::from_millis(5));
+    }
+
+    for event in events {
+        coop.apply(event, Some(&guest_dir));
+    }
+
+    poll_until(&mut [&mut host, &mut guest], |sessions| {
+        settled(sessions) && levels(sessions[0], host_id) == 2 && levels(sessions[1], guest_id) == 2
+    });
+
+    let expected =
+        [Some("/turf"), Some("/turf"), Some("/obj/level3"), Some("/obj/level3")].map(|path| path.map(String::from));
+    assert_eq!(tops(&host, &host_dir.join("_maps/a.dmm")), expected);
+    assert_eq!(tops(&guest, &guest_dir.join("_maps/a.dmm")), expected);
+
+    for dir in [host_dir, guest_dir] {
+        let _ = fs::remove_dir_all(dir);
+    }
+}
+
 // a copy of a map someone else shares, levels 1 to 3 topped with nothing, /obj/two and /obj/three
 fn three_level_copy(name: &str) -> (PathBuf, Session, PathBuf) {
     let (dir, mut session) = hosting(name);
