@@ -717,6 +717,7 @@ impl App {
                 bake.profile = Some(core::path::TreePath::parse(&profile));
             },
             ProfileReload::Force(profile) => bake.forced_profile = profile,
+            ProfileReload::Current => {},
         }
         self.ui.set_load_notice(None);
         self.session.begin_coop_reload();

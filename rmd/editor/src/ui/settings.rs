@@ -992,6 +992,15 @@ fn draw_profile_setting(
         return;
     }
 
+    {
+        let _disabled = ui.begin_disabled_with_cond(loading);
+        if ui.button("Reload profile") {
+            *pending_profile = Some(ProfileReload::Current);
+        }
+
+        ui.set_item_tooltip("Recompile the codebase and its profile. Open maps and unsaved changes are kept");
+    }
+
     let forced = environment.bake_options.forced_profile.as_deref();
     ui.text("Forced profile");
     if let Ok(dir) = crate::settings::profiles_dir() {
@@ -1071,6 +1080,7 @@ fn draw_profile_setting(
 
 fn draw_profile_reload_dialog(ui: &Ui, pending_profile: &mut Option<ProfileReload>) -> Option<ProfileReload> {
     let message = match pending_profile.as_ref()? {
+        ProfileReload::Current => return pending_profile.take(),
         ProfileReload::Select(profile) => format!("Reload the codebase with {profile}?"),
         ProfileReload::Force(Some(profile)) => {
             format!("Reload the codebase with the {} profile?", profile_label(profile))
@@ -1479,6 +1489,22 @@ mod tests {
 
             assert!(context.render_legacy().valid());
         }
+    }
+
+    #[test]
+    fn reloading_the_current_profile_skips_the_confirmation() {
+        let _context = IMGUI_CONTEXT.lock().unwrap();
+        let mut context = super::super::fixtures::rectangle_context();
+        let mut pending_profile = Some(ProfileReload::Current);
+
+        let ui = context.frame();
+        let request = draw_profile_reload_dialog(ui, &mut pending_profile);
+        let is_open = ui.is_popup_open(PROFILE_RELOAD_POPUP);
+        assert!(context.render_legacy().valid());
+
+        assert_eq!(request, Some(ProfileReload::Current));
+        assert_eq!(pending_profile, None);
+        assert!(!is_open);
     }
 
     #[test]

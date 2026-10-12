@@ -205,6 +205,7 @@ pub struct UiOutput {
 pub enum ProfileReload {
     Select(String),
     Force(Option<String>),
+    Current,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
