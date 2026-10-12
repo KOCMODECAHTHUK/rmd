@@ -1179,13 +1179,22 @@ fn node_groups_accept_matching_vars() {
 fn node_groups_reject_invalid_arguments() {
     let (tree, module) = compile(fixture!("programs/node_groups_reject_invalid_arguments.dm"));
     for (path, message) in [
-        ("/datum/demir/subtype", "demir_node_group subtype must be a type, got not a type"),
-        ("/datum/demir/blocker", "demir_node_group blocker must be a type, got not a type"),
+        (
+            "/datum/demir/subtype",
+            "demir_node_group subtype must be a type, got not a type",
+        ),
+        (
+            "/datum/demir/blocker",
+            "demir_node_group blocker must be a type, got not a type",
+        ),
         (
             "/datum/demir/orientable",
             "demir_node_group orientable_subtype must be a descendant of the subtype, got /obj/other",
         ),
-        ("/datum/demir/matching", "demir_node_group matching must name vars as text, got 2"),
+        (
+            "/datum/demir/matching",
+            "demir_node_group matching must name vars as text, got 2",
+        ),
     ] {
         let profile = tree.id_of(&TreePath::parse(path)).expect("profile");
         let bake = Bake::new_with_profile(

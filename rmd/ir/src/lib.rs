@@ -525,9 +525,7 @@ impl Module {
 
     /// Names a procedure left for the runtime to resolve, declared in its entry block, each at the line of its
     /// first use
-    pub fn named_variables<'m>(
-        &'m self, procedure: &'m Procedure,
-    ) -> impl Iterator<Item = (&'m Identifier, Location)> {
+    pub fn named_variables<'m>(&'m self, procedure: &'m Procedure) -> impl Iterator<Item = (&'m Identifier, Location)> {
         self.block(procedure.body)
             .unwrap_or_default()
             .iter()
