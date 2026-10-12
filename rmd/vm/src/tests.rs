@@ -3263,6 +3263,85 @@ fn nameof_resolves_a_proc_path_to_its_name() {
     );
 }
 
+#[test]
+fn proc_macro_names_the_enclosing_proc() {
+    assert_eq!(
+        run(fixture!("programs/proc_macro_names_the_enclosing_proc.dm"), "test"),
+        "global_name work work".into()
+    );
+}
+
+#[test]
+fn proc_macro_is_the_proc_path() {
+    assert_eq!(
+        run(fixture!("programs/proc_macro_is_the_proc_path.dm"), "test"),
+        3.into()
+    );
+}
+
+#[test]
+fn proc_macro_calls_back_into_a_proc_block_proc() {
+    assert_eq!(
+        run(
+            fixture!("programs/proc_macro_calls_back_into_a_proc_block_proc.dm"),
+            "test"
+        ),
+        3.into()
+    );
+}
+
+/// Non-constant var defaults lower as hidden procs, which must not count as the current proc.
+#[test]
+fn proc_macro_is_null_in_a_var_initializer() {
+    assert_eq!(
+        run(fixture!("programs/proc_macro_is_null_in_a_var_initializer.dm"), "test"),
+        GenericValue::Null
+    );
+}
+
+#[test]
+fn type_macro_is_the_declaring_type() {
+    assert_eq!(
+        run(fixture!("programs/type_macro_is_the_declaring_type.dm"), "test"),
+        3.into()
+    );
+}
+
+#[test]
+fn type_macro_is_null_in_a_global_proc() {
+    assert_eq!(
+        run(fixture!("programs/type_macro_is_null_in_a_global_proc.dm"), "test"),
+        GenericValue::Null
+    );
+}
+
+#[test]
+fn type_macro_can_be_instantiated() {
+    assert_eq!(
+        run(fixture!("programs/type_macro_can_be_instantiated.dm"), "test"),
+        7.into()
+    );
+}
+
+#[test]
+fn type_macro_names_the_owner_in_a_var_initializer() {
+    assert_eq!(
+        run(
+            fixture!("programs/type_macro_names_the_owner_in_a_var_initializer.dm"),
+            "test"
+        ),
+        1.into()
+    );
+}
+
+#[test]
+fn type_macro_is_an_identifier_after_undef() {
+    assert_eq!(
+        run(fixture!("programs/type_macro_is_an_identifier_after_undef.dm"), "test"),
+        5.into()
+    );
+}
+
 /// A global proc called from inside a method binds to the global. `find_proc` would reach the same
 /// body, but only after failing a lookup on the runtime type of `src` at every call.
 #[test]

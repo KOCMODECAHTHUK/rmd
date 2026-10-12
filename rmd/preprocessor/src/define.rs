@@ -22,11 +22,18 @@ pub struct Parameter<'a> {
     pub variadic: bool,
 }
 
-/// `__LINE__`, `__FILE__`
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Builtin {
+    /// `__LINE__`
     Line,
+    /// `__FILE__`
     File,
+    /// `__TYPE__`
+    Type,
+    /// `__IMPLIED_TYPE__`
+    ImpliedType,
+    /// `__PROC__`
+    Proc,
 }
 
 /// `#define FOO`, `#define FOO()`
@@ -99,6 +106,9 @@ impl<'a> DefineTable<'a> {
         let mut table = Self::default();
         table.define(Define::builtin("__LINE__", Builtin::Line));
         table.define(Define::builtin("__FILE__", Builtin::File));
+        table.define(Define::builtin("__TYPE__", Builtin::Type));
+        table.define(Define::builtin("__IMPLIED_TYPE__", Builtin::ImpliedType));
+        table.define(Define::builtin("__PROC__", Builtin::Proc));
 
         table
     }

@@ -1879,6 +1879,7 @@ impl<'a, 't> Parser<'a, 't> {
             },
             Token::Soft(keyword) => self.parse_soft_keyword_expression(keyword),
             Token::Identifier(name) => Ok(self.make_expr(Expression::Identifier(Identifier::from(name)))),
+            Token::ContextMacro(kind) => Ok(self.make_expr(Expression::ContextMacro(kind))),
             other => Err(ParseError::unexpected("an expression", other, location)),
         }
     }
@@ -1976,6 +1977,10 @@ impl<'a, 't> Parser<'a, 't> {
             Some(Token::Soft(keyword)) if let Some(builtin) = soft_builtin(keyword) => {
                 self.advance()?;
                 Some(self.make_expr(Expression::Builtin(builtin)))
+            },
+            Some(Token::ContextMacro(kind)) => {
+                self.advance()?;
+                Some(self.make_expr(Expression::ContextMacro(kind)))
             },
             Some(token) if token.is_identifier() => {
                 self.advance()?;

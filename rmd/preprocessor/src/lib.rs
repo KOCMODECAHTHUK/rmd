@@ -15,7 +15,11 @@ use std::{
     path::{Component, Path, PathBuf},
 };
 
-use lexer::{IndentState, Lexer, token::Token};
+use lexer::{
+    IndentState,
+    Lexer,
+    token::{ContextMacro, Token},
+};
 use rustc_hash::FxHashMap;
 
 use crate::{
@@ -1390,6 +1394,9 @@ impl<'a> Preprocessor<'a> {
 
                 Token::RawStringLiteral(self.arena.alloc(path))
             },
+            Builtin::Type => Token::ContextMacro(ContextMacro::Type),
+            Builtin::ImpliedType => Token::ContextMacro(ContextMacro::ImpliedType),
+            Builtin::Proc => Token::ContextMacro(ContextMacro::Proc),
         }
     }
 

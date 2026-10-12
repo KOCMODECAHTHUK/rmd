@@ -79,6 +79,13 @@ impl std::fmt::Display for SoftKeyword {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ContextMacro {
+    Type,
+    ImpliedType,
+    Proc,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Token<'a> {
     Eof,
     Identifier(&'a str),
@@ -207,6 +214,8 @@ pub enum Token<'a> {
 
     LineComment(&'a str),
     BlockComment(&'a str),
+
+    ContextMacro(ContextMacro),
 }
 
 impl<'a> Token<'a> {
@@ -487,6 +496,12 @@ impl std::fmt::Display for Token<'_> {
             Token::InterpStringEnd(s) => write!(f, "]{s}\""),
 
             Token::LineComment(s) | Token::BlockComment(s) => write!(f, "{s}"),
+
+            Token::ContextMacro(m) => match m {
+                ContextMacro::Type => write!(f, "__TYPE__"),
+                ContextMacro::ImpliedType => write!(f, "__IMPLIED_TYPE__"),
+                ContextMacro::Proc => write!(f, "__PROC__"),
+            },
         }
     }
 }

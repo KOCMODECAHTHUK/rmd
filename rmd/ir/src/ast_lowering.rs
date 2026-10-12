@@ -4,7 +4,7 @@ use core::{
     types::{Identifier, InputType, ListEntry, Value, VarModifiers, VarSpec},
 };
 
-use ast::{AST, AccessKind, Expression, ExpressionId, ForLoop, Literal, Statement};
+use ast::{AST, AccessKind, ContextMacro, Expression, ExpressionId, ForLoop, Literal, Statement};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::*;
@@ -39,6 +39,7 @@ pub struct IrModuleBuilder<'a> {
     current_block: Option<IrNodeId>,
     entry: IrNodeId,
     current_owner: TreePath,
+    current_proc: Option<TreePath>,
     locals_in_memory: bool,
     depth: usize,
     line: Option<SourceLine>,
@@ -102,6 +103,7 @@ impl<'a> IrModuleBuilder<'a> {
             current_block: None,
             entry: IrNodeId(0),
             current_owner: TreePath::default(),
+            current_proc: None,
             locals_in_memory: false,
             depth: 0,
             line: None,
@@ -113,14 +115,9 @@ impl<'a> IrModuleBuilder<'a> {
         &mut self, owner: TreePath, name: Identifier, ty: Option<TreePath>, expression: ExpressionId,
         location: Location,
     ) -> ProcId {
-        let id = self.lower_proc(
-            owner,
-            name,
-            &[],
-            false,
-            &[Statement::Return(Some(expression))],
-            location,
-        );
+        let id = self.lower_function(owner, name, &[], false, None, location, false, |this| {
+            this.lower_statements(&[Statement::Return(Some(expression))])
+        });
 
         if let Some(ty) = ty
             && let Some(body) = self.module.proc(id).map(|proc| proc.body)
@@ -182,6 +179,7 @@ impl<'a> IrModuleBuilder<'a> {
         intrinsic: Option<Intrinsic>, location: Location,
     ) -> ProcId {
         let locals_in_memory = statements_contain_try(body);
+        let proc = owner.concat(&TreePath::parse(&format!("proc/{name}")));
 
         self.lower_function(
             owner,
@@ -191,7 +189,10 @@ impl<'a> IrModuleBuilder<'a> {
             intrinsic,
             location,
             locals_in_memory,
-            |this| this.lower_statements(body),
+            |this| {
+                this.current_proc = Some(proc);
+                this.lower_statements(body)
+            },
         )
     }
 
@@ -305,6 +306,7 @@ impl<'a> IrModuleBuilder<'a> {
         self.current_block = None;
         self.locals_in_memory = false;
         self.depth = 0;
+        self.current_proc = None;
     }
 
     fn make_node(&mut self, node: IrNode) -> IrNodeId {
@@ -851,11 +853,21 @@ impl<'a> IrModuleBuilder<'a> {
                     Literal::Resource(s) => Value::Resource(s.clone()),
                 });
             },
-            Some(Expression::Identifier(name)) if name.as_str() == "__TYPE__" => {
+            Some(Expression::ContextMacro(ContextMacro::Type)) => {
                 let owner = self.current_owner.clone();
                 return match owner == TreePath::default() {
                     true => self.undefined(),
                     false => self.intern_constant(Value::Path(owner)),
+                };
+            },
+            Some(Expression::ContextMacro(ContextMacro::ImpliedType)) => {
+                // TODO: Handle this someday
+                return self.undefined();
+            },
+            Some(Expression::ContextMacro(ContextMacro::Proc)) => {
+                return match self.current_proc.clone() {
+                    Some(proc) => self.intern_constant(Value::Path(proc)),
+                    None => self.undefined(),
                 };
             },
             Some(Expression::Identifier(name)) => match (self.lookup(name), self.current_block) {
@@ -1316,10 +1328,13 @@ impl<'a> IrModuleBuilder<'a> {
         if !matches!(self.module.node(value), Some(IrNode::New { ty: None, .. })) {
             return;
         }
+
         let Some(inferred) = inferred else {
             return;
         };
+
         let ty = self.intern_constant(Value::Path(inferred));
+
         if let Some(IrNode::New { ty: target, .. }) = self.module.nodes.get_mut(value.0 as usize) {
             *target = Some(ty);
         }
@@ -1330,6 +1345,9 @@ impl<'a> IrModuleBuilder<'a> {
         match self.ast.get_expr(expression)? {
             Expression::Path(path) => path.name().map(Identifier::to_string),
             Expression::Field { name, .. } | Expression::Identifier(name) => Some(name.to_string()),
+            Expression::ContextMacro(ContextMacro::Proc) => {
+                self.current_proc.as_ref()?.name().map(Identifier::to_string)
+            },
             _ => None,
         }
     }

@@ -4,6 +4,8 @@ use core::{
     types::{Identifier, VarModifiers},
 };
 
+pub use lexer::token::ContextMacro;
+
 use crate::parser::{ParseResult, Parser};
 
 pub mod constant;
@@ -231,6 +233,9 @@ pub enum Expression {
     Path(TreePath),
     /// `src`, `usr`, `world`, `global`, `args`
     Builtin(Builtin),
+
+    /// `__TYPE__`, `__IMPLIED_TYPE__`, `__PROC__`
+    ContextMacro(ContextMacro),
 
     /// `f((a = 1))`
     Grouped(ExpressionId),
