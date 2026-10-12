@@ -1420,11 +1420,7 @@ impl<'a> IrModuleBuilder<'a> {
     fn lower_stmt(&mut self, stmt: &Statement, label: Option<&Identifier>) {
         self.line = None;
         match stmt {
-            Statement::Empty | Statement::Setting { .. } if !is_waitfor(stmt) => {},
-            Statement::Setting { .. } => {
-                self.emit_instr(IrNode::Blocked("set waitfor"));
-            },
-            Statement::Empty => {},
+            Statement::Setting { .. } | Statement::Empty => {},
             Statement::Output { target, value } => {
                 let target = self.lower_output_target(*target);
                 let value = self.lower_expr(*value);
@@ -2016,10 +2012,6 @@ fn statement_contains_try(statement: &Statement) -> bool {
     }
 }
 
-fn is_waitfor(stmt: &Statement) -> bool {
-    matches!(stmt, Statement::Setting { name, .. } if name.as_str() == "waitfor")
-}
-
 #[cfg(test)]
 mod tests {
     macro_rules! fixture {
@@ -2096,17 +2088,15 @@ mod tests {
     }
 
     #[test]
-    fn unoptimized_lowering_removes_cfg_after_a_blocking_setting() {
-        let (module, _) = lower_with_optimizations(
-            fixture!("programs/unoptimized_cleanup_after_blocking_setting.dm"),
-            false,
-        );
+    fn unoptimized_lowering_removes_cfg_after_a_blocking_statement() {
+        let (module, _) =
+            lower_with_optimizations(fixture!("programs/unoptimized_cleanup_after_blocking_input.dm"), false);
 
         assert_eq!(blocks(&module).len(), 1, "{:?}", nodes(&module));
         let body = module.block(module.procs[0].body).expect("procedure body");
         assert!(matches!(
             body.last().and_then(|id| module.node(*id)),
-            Some(IrNode::Blocked("set waitfor"))
+            Some(IrNode::Blocked("input"))
         ));
         assert!(module.procs[0].vars[1].dimensions.iter().all(Option::is_none));
         verify(&module).expect("unoptimized lowering should produce valid IR");

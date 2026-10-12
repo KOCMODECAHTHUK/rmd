@@ -2528,6 +2528,13 @@ fn initial_reads_the_builtin_type_vars() {
 }
 
 #[test]
+fn a_proc_that_does_not_wait_still_runs() {
+    let result = run(fixture!("programs/a_proc_that_does_not_wait_still_runs.dm"), "test");
+
+    assert_eq!(result, GenericValue::Num(3.0));
+}
+
+#[test]
 fn vars_reads_show_current_values() {
     let result = run(fixture!("programs/vars_reads_show_current_values.dm"), "test");
 
