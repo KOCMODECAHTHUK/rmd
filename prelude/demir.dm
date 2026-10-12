@@ -61,8 +61,6 @@
 
 // Appearance profile
 
-#define DEMIR_MODULAR_LOADER_TG "tgstation"
-
 #define DEMIR_CONNECTION_SOURCE 1
 #define DEMIR_CONNECTION_TARGET 2
 
@@ -93,9 +91,6 @@
 	/// Select this profile when the user has not chosen another one. Exactly one profile subtype
 	/// must directly set this to a true value when a codebase defines profiles.
 	var/default = FALSE
-
-	/// Name the codebase's modular loader, or null if it has none.
-	var/modular_loader = null as text|null
 
 	proc/bake(atom/target)
 
