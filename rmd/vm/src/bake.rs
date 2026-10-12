@@ -47,6 +47,8 @@ const CONNECTION_SOURCE: u8 = 1;
 const CONNECTION_TARGET: u8 = 2;
 const CONNECTION_ROLES: u8 = CONNECTION_SOURCE | CONNECTION_TARGET;
 
+const APPEARANCE_CACHE_MAX_ENTRIES: usize = 50_000;
+
 pub const HIGHLIGHT_SELECTED: u8 = 1;
 pub const HIGHLIGHT_HOVERED: u8 = 2;
 pub const HIGHLIGHT_ALWAYS: u8 = 4;
@@ -204,6 +206,13 @@ struct CacheKey {
     size: [i32; 3],
 }
 
+// only the first bake caches appearances, edits and rebakes run every atom
+#[derive(Default)]
+struct AppearanceCache {
+    appearances: HashMap<CacheKey, SharedAppearance>,
+    fingerprints: HashMap<u64, u64>,
+}
+
 pub type SharedAppearance = Arc<AppearanceDelta>;
 
 fn shared(appearance: AppearanceDelta) -> SharedAppearance {
@@ -266,9 +275,6 @@ pub struct Bake {
     pub attempted: usize,
     pub succeeded: usize,
     pub cache_hits: usize,
-    cache: HashMap<CacheKey, SharedAppearance>,
-    epoch: u64,
-    fingerprints: HashMap<u64, u64>,
     pub limits: Limits,
     atoms: HashMap<u64, Placed>,
     objects: HashMap<u64, ObjectId>,
@@ -439,15 +445,21 @@ impl Bake {
             bake.lighting = Some(LightingMap::build(size, atoms));
         }
 
+        let mut cache = AppearanceCache::default();
         for id in &ids {
-            bake.fingerprint(*id);
+            if let Some(fingerprint) = bake
+                .fingerprint(*id)
+                .or_else(|| bake.atoms.get(id).map(|atom| atom.constants))
+            {
+                cache.fingerprints.insert(*id, fingerprint);
+            }
         }
 
         for (index, id) in ids.iter().enumerate() {
             if index.is_multiple_of(4096) {
                 progress(Stage::Smooth, index, total);
             }
-            bake.bake_atom(tree, module, *id);
+            bake.bake_atom(tree, module, *id, Some(&mut cache));
         }
 
         progress(Stage::Smooth, total, total);
@@ -582,7 +594,6 @@ impl Bake {
             },
         }
 
-        self.fingerprints.insert(atom.instance, fingerprint);
         self.cells.entry(atom.position).or_default().push(atom.instance);
         self.atoms.insert(atom.instance, placed);
     }
@@ -886,13 +897,9 @@ impl Bake {
         self.diagnostics.record(fault);
     }
 
-    fn fingerprint(&mut self, id: u64) {
-        let Some(atom) = self.atoms.get(&id) else {
-            return;
-        };
-        let Some(object) = self.object(id).and_then(|id| self.runtime.heap.object(id)) else {
-            return;
-        };
+    fn fingerprint(&self, id: u64) -> Option<u64> {
+        let atom = self.atoms.get(&id)?;
+        let object = self.object(id).and_then(|id| self.runtime.heap.object(id))?;
 
         let mut vars = object
             .vars
@@ -904,10 +911,11 @@ impl Bake {
         let mut hasher = DefaultHasher::new();
         atom.constants.hash(&mut hasher);
         vars.hash(&mut hasher);
-        self.fingerprints.insert(id, hasher.finish());
+
+        Some(hasher.finish())
     }
 
-    fn cache_key(&self, id: u64) -> Option<CacheKey> {
+    fn cache_key(&self, cache: &AppearanceCache, id: u64) -> Option<CacheKey> {
         let atom = self.atoms.get(&id)?;
         let mut hasher = DefaultHasher::new();
         for dx in -1..=1 {
@@ -923,7 +931,7 @@ impl Bake {
                     let Some(entry) = self
                         .atoms
                         .get(id)
-                        .zip(self.fingerprints.get(id))
+                        .zip(cache.fingerprints.get(id))
                         .map(|(atom, fingerprint)| (atom.ty, *fingerprint))
                     else {
                         continue;
@@ -937,7 +945,7 @@ impl Bake {
 
         Some(CacheKey {
             ty: atom.ty,
-            vars: *self.fingerprints.get(&id)?,
+            vars: *cache.fingerprints.get(&id)?,
             neighborhood: hasher.finish(),
             position: None,
             size: self.runtime.world.size,
@@ -973,7 +981,7 @@ impl Bake {
         }
     }
 
-    fn bake_atom(&mut self, tree: &ObjectTree, module: &Module, id: u64) {
+    fn bake_atom(&mut self, tree: &ObjectTree, module: &Module, id: u64, cache: Option<&mut AppearanceCache>) {
         self.remove_contribution(id);
         if self.failed.contains(&id) {
             return;
@@ -989,16 +997,18 @@ impl Bake {
             self.diagnostics.remove(&fault);
         }
         self.attempted += 1;
-        let key = (self.epoch == 0).then(|| self.cache_key(id)).flatten();
-        let cached = key
-            .as_ref()
-            .and_then(|key| self.cache.get(key))
-            .or_else(|| {
-                let mut positioned = key?;
-                positioned.position = self.position(id);
-                self.cache.get(&positioned)
-            })
-            .cloned();
+        let key = cache.as_deref().and_then(|cache| self.cache_key(cache, id));
+        let cached = cache.as_deref().and_then(|cache| {
+            key.as_ref()
+                .and_then(|key| cache.appearances.get(key))
+                .or_else(|| {
+                    let mut positioned = key?;
+                    positioned.position = self.position(id);
+                    cache.appearances.get(&positioned)
+                })
+                .cloned()
+        });
+
         if let Some(appearance) = cached {
             self.cache_hits += 1;
             self.succeeded += 1;
@@ -1019,12 +1029,13 @@ impl Bake {
                     && values.len() == 1
                     && let Some(appearance) = values.get(&id)
                     && let Some(mut key) = key
+                    && let Some(cache) = cache
                 {
                     if preview.position_sensitive {
                         key.position = self.position(id);
                     }
-                    if self.cache.len() < 50_000 {
-                        self.cache.insert(key, Arc::clone(appearance));
+                    if cache.appearances.len() < APPEARANCE_CACHE_MAX_ENTRIES {
+                        cache.appearances.insert(key, Arc::clone(appearance));
                     }
                 }
                 self.install_contribution(id, values);
@@ -1109,7 +1120,6 @@ impl Bake {
         &mut self, tree: &ObjectTree, module: &Module, replacements: Vec<Atom>, removed: &[u64],
         mut progress: impl FnMut(Stage, usize, usize),
     ) -> BakeUpdate {
-        self.epoch = self.epoch.wrapping_add(1);
         let mut replacements_by_id = HashMap::new();
         for atom in replacements {
             replacements_by_id.insert(atom.instance, atom);
@@ -1161,7 +1171,6 @@ impl Bake {
                     }
                 }
             }
-            self.fingerprints.remove(id);
             if let Some(fault) = self.faults.remove(id) {
                 self.diagnostics.remove(&fault);
             }
@@ -1203,7 +1212,6 @@ impl Bake {
                 self.connect(tree, module, *id);
                 self.highlight(tree, module, *id);
                 self.light(tree, module, *id);
-                self.fingerprint(*id);
 
                 if self.lighting.is_some() {
                     let light = self.harvest_light(tree, *id);
@@ -1255,7 +1263,7 @@ impl Bake {
                 if index.is_multiple_of(4096) {
                     progress(Stage::Smooth, index, affected.len());
                 }
-                self.bake_atom(tree, module, *id);
+                self.bake_atom(tree, module, *id, None);
             }
         }
         let mut changed = self.compose();
@@ -1293,16 +1301,13 @@ impl Bake {
         freed("contributions by target");
         drop(std::mem::take(&mut self.contributions));
         freed("contribution lists");
-        drop(std::mem::take(&mut self.cache));
-        freed("appearance cache");
         drop(self.lighting.take());
         freed("lighting map");
         drop(std::mem::take(&mut self.atoms));
         freed("atoms");
         drop(std::mem::take(&mut self.objects));
-        drop(std::mem::take(&mut self.fingerprints));
         drop(std::mem::take(&mut self.cells));
-        freed("object, fingerprint and cell maps");
+        freed("object and cell maps");
         drop(std::mem::take(&mut self.prepared));
         drop(std::mem::take(&mut self.prepare_faults));
         drop(std::mem::take(&mut self.lit));
@@ -1332,7 +1337,6 @@ impl Bake {
             return BakeUpdate::default();
         }
 
-        self.epoch = self.epoch.wrapping_add(1);
         let all = self.sorted_ids();
         let mut carried = Vec::with_capacity(all.len());
         for id in &all {
@@ -1359,13 +1363,8 @@ impl Bake {
             self.highlight(tree, module, id);
         }
 
-        let ids = selected(request.appearance);
-        for id in &ids {
-            self.fingerprint(*id);
-        }
-
-        for id in &ids {
-            self.bake_atom(tree, module, *id);
+        for id in selected(request.appearance) {
+            self.bake_atom(tree, module, id, None);
         }
 
         BakeUpdate {
