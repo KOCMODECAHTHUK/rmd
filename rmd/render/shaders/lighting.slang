@@ -37,12 +37,6 @@ func vs_main(u32 vertex_id: SV_VertexID) -> VSOutput {
     return output;
 }
 
-func to_linear(f32x4 color) -> f32x4 {
-    let straight = color.a > 0.0 ? color.rgb / color.a : f32x3(0.0);
-
-    return f32x4(srgb_to_linear(straight) * color.a, color.a);
-}
-
 [shader("fragment")]
 func fs_resolve(VSOutput input) -> f32x4 {
     return to_linear(scene.Load(i32x3(i32x2(input.position.xy), 0)));

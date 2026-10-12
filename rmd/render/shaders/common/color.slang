@@ -75,6 +75,13 @@ public func srgb_to_linear(f32x3 color) -> f32x3 {
     return select(color < 0.04045, color / 12.92, pow(abs(color + 0.055) / 1.055, 2.4));
 }
 
+// premultiplied
+public func to_linear(f32x4 color) -> f32x4 {
+    let straight = color.a > 0.0 ? color.rgb / color.a : f32x3(0.0);
+
+    return f32x4(srgb_to_linear(straight) * color.a, color.a);
+}
+
 public func luminance(f32x3 color) -> f32 {
     return dot(color, f32x3(0.299, 0.587, 0.114));
 }

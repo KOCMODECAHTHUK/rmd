@@ -150,15 +150,21 @@ func fs_main(VSOutput input) -> f32x4 {
         }
     }
 
-    if (input.sprite_id != 0) {
-        let flags = sprites[input.sprite_id - 1].flags();
-        if ((flags & (SPRITE_FLAG_EMISSIVE_MASK | SPRITE_FLAG_EMISSIVE_BLOCKER |
-                      SPRITE_FLAG_OVERLAY_LIGHT | SPRITE_FLAG_OVERLAY_LIGHT_SUBTRACT)) != 0) {
-            discard;
-        }
+    if (input.sprite_id == 0) {
+        discard;
     }
 
-    return sample_sprite_I_FUCKING_HATE_BYOND(input, false);
+    let flags = sprites[input.sprite_id - 1].flags();
+    if ((flags & (SPRITE_FLAG_EMISSIVE_MASK | SPRITE_FLAG_EMISSIVE_BLOCKER |
+                  SPRITE_FLAG_OVERLAY_LIGHT | SPRITE_FLAG_OVERLAY_LIGHT_SUBTRACT)) != 0) {
+        discard;
+    }
+
+    if ((flags & SPRITE_AREA_EDGE_MASK) != 0) {
+        return sample_sprite_I_FUCKING_HATE_BYOND(input, false);
+    }
+
+    return to_linear(sample_sprite_I_FUCKING_HATE_BYOND(input, true));
 }
 
 struct SceneOutput {
