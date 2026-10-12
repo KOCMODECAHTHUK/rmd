@@ -244,6 +244,12 @@ impl Session {
             return Err(format!("map dimensions must each be between 1 and {MAX_MAP_DIMENSION}"));
         }
         let id = self.state.active().ok_or_else(|| String::from("no map is open"))?;
+
+        // a resize reshares the map
+        if self.is_coop_level_requested(id) {
+            return Err(String::from("the last level change has not arrived yet"));
+        }
+
         if self.node_edit.as_ref().is_some_and(|edit| edit.document == id) {
             self.cancel_node_edit();
         }

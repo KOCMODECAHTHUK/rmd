@@ -532,6 +532,29 @@ fn a_level_created_while_a_reshare_uploads_reaches_peers() {
 }
 
 #[test]
+fn a_map_waiting_on_a_level_change_cannot_reshare() {
+    let (host_dir, mut host, guest_dir, mut guest, host_id, guest_id) = shared_pair("level-no-reshare");
+
+    assert_eq!(host.create_level(host_id, &plain_fill()), Ok(2));
+    host.poll_coop();
+    assert!(host.is_coop_level_requested(host_id));
+    assert!(!host.can_share_coop_map());
+    assert!(host.resize_map(3, 1, &plain_fill()).is_err());
+    host.share_coop_map();
+    assert!(host.coop().unwrap().shared_maps["_maps/a.dmm"].is_ready());
+
+    poll_until(&mut [&mut host, &mut guest], |sessions| {
+        settled(sessions) && sessions[1].state.document(guest_id).unwrap().map.size().z == 2
+    });
+    assert!(host.can_share_coop_map());
+    assert_eq!(host.resize_map(3, 1, &plain_fill()), Ok(()));
+
+    for dir in [host_dir, guest_dir] {
+        let _ = fs::remove_dir_all(dir);
+    }
+}
+
+#[test]
 fn shared_levels_keep_coordinates_and_allow_tile_history() -> Result<(), Box<dyn Error>> {
     let (host_dir, mut host, guest_dir, mut guest, host_id, guest_id) = shared_pair("level-history");
     guest.create_level(guest_id, &plain_fill())?;

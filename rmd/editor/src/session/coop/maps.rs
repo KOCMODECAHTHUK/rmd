@@ -228,15 +228,16 @@ impl Session {
 
     pub fn can_share_coop_map(&self) -> bool { self.state.active().is_some_and(|id| self.can_share_coop_document(id)) }
 
+    // our own reshare would carry a level change we're still waiting on as a new one
     pub fn can_share_coop_document(&self, id: DocumentId) -> bool {
-        self.can_share_coop_maps() && self.coop_map_path(id).is_some()
+        self.can_share_coop_maps() && self.coop_map_path(id).is_some() && !self.is_coop_level_requested(id)
     }
 
     pub fn share_coop_file(&mut self, file: &Path) -> bool {
         let Some(id) = self
             .state
             .document_for_path(file)
-            .filter(|_| self.can_share_coop_maps())
+            .filter(|id| self.can_share_coop_maps() && !self.is_coop_level_requested(*id))
         else {
             return false;
         };
@@ -248,7 +249,7 @@ impl Session {
     }
 
     pub fn share_coop_map(&mut self) {
-        if let Some(id) = self.state.active() {
+        if let Some(id) = self.state.active().filter(|id| !self.is_coop_level_requested(*id)) {
             self.share_coop_document(id);
         }
     }
