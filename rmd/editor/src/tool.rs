@@ -72,6 +72,15 @@ impl SelectionRotation {
         }
     }
 
+    pub const fn counter_clockwise(self) -> Self {
+        match self {
+            Self::Original => Self::CounterClockwise,
+            Self::Clockwise => Self::Original,
+            Self::Half => Self::Clockwise,
+            Self::CounterClockwise => Self::Half,
+        }
+    }
+
     const fn transforms(self) -> &'static [SelectionTransform] {
         match self {
             Self::Original => &[],

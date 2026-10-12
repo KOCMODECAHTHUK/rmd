@@ -43,6 +43,7 @@ mod search;
 
 use self::{
     bake::report_bake_output,
+    clipboard::FloatingPaste,
     diff::DiffState,
     direction::direction_state,
     edit::is_reorder_label,
@@ -118,6 +119,7 @@ pub struct Session {
     node_edit: Option<NodeEditState>,
     identical: Option<instance::IdenticalCache>,
     coop: Option<Coop>,
+    floating_paste: Option<FloatingPaste>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -162,6 +164,7 @@ impl Session {
             node_edit: None,
             identical: None,
             coop: None,
+            floating_paste: None,
         }
     }
 

@@ -264,6 +264,8 @@ impl History {
         self.undo_stack.iter().filter_map(|entry| entry.group).collect()
     }
 
+    pub fn undo_group(&self) -> Option<EditGroupId> { self.undo_stack.last()?.group }
+
     pub fn undo_depth(&self) -> usize { self.undo_stack.len() }
 
     pub fn can_undo(&self) -> bool { !self.undo_stack.is_empty() }

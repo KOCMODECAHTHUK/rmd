@@ -64,6 +64,7 @@ impl Session {
         });
         document.set_selection(selection, selection_mode);
         document.select_instance(None);
+        self.floating_paste = None;
 
         selection.is_some()
     }
@@ -74,6 +75,14 @@ impl Session {
     ) -> bool {
         if !self.can_place_selected_block_with_mode(target_min, rotation, placement, selection_mode) {
             return false;
+        }
+
+        if placement == SelectionPlacement::Move
+            && rotation == SelectionRotation::Original
+            && let Some(floating) = self.live_floating_paste()
+            && floating.target.mode == selection_mode
+        {
+            return self.repaste_floating(target_min, floating.rotation);
         }
 
         let hidden = self.hidden_types();
@@ -107,6 +116,7 @@ impl Session {
                 bounds: selection,
                 mode: selection_mode,
             },
+            None,
         )
     }
 
@@ -205,6 +215,19 @@ impl Session {
             return false;
         }
 
+        if let Some(floating) = self.live_floating_paste()
+            && floating.target.mode == selection_mode
+        {
+            let rotation = match transform {
+                SelectionTransform::RotateClockwise => Some(floating.rotation.clockwise()),
+                SelectionTransform::RotateCounterClockwise => Some(floating.rotation.counter_clockwise()),
+                SelectionTransform::MirrorHorizontal | SelectionTransform::MirrorVertical => None,
+            };
+            if let Some(rotation) = rotation {
+                return self.repaste_floating(floating.target.bounds.min, rotation);
+            }
+        }
+
         let hidden = self.hidden_types();
         let built = {
             let Some((environment, document)) = self.state.active_pair_mut() else {
@@ -234,6 +257,7 @@ impl Session {
                 bounds: selection,
                 mode: selection_mode,
             },
+            None,
         )
     }
 

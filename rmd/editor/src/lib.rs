@@ -410,22 +410,6 @@ impl EditorState {
         Some((self.environment.as_ref()?, self.active_document()?))
     }
 
-    pub fn active_paste_mut(&mut self) -> Option<(&Environment, &mut MapDocument, &TileBlock)> {
-        let Self {
-            environment,
-            documents,
-            active,
-            clipboard,
-            ..
-        } = self;
-        let environment = environment.as_ref()?;
-        let block = clipboard.as_ref()?;
-        let id = (*active)?;
-        let document = documents.iter_mut().find(|document| document.id() == id)?;
-
-        Some((environment, document, block))
-    }
-
     pub fn clipboard(&self) -> Option<&TileBlock> { self.clipboard.as_ref() }
 
     pub fn set_clipboard(&mut self, block: TileBlock) { self.clipboard = Some(block); }

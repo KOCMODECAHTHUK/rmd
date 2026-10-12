@@ -2,12 +2,20 @@ use dmm::Coord;
 use editor::{
     clipboard::{self, TileBlock},
     command::EditGroupId,
-    document::Selection,
+    document::{DocumentId, Selection},
     frame::HiddenTypes,
     tool::{BlockSelectionMode, SelectionMask, SelectionRotation, ToolEdit},
 };
 
 use super::Session;
+
+pub(super) struct FloatingPaste {
+    document: DocumentId,
+    group: EditGroupId,
+    block: TileBlock,
+    pub(super) rotation: SelectionRotation,
+    pub(super) target: SelectionMask,
+}
 
 impl Session {
     pub(super) fn hidden_types(&self) -> HiddenTypes {
@@ -134,26 +142,87 @@ impl Session {
     }
 
     pub fn paste_clipboard(&mut self, min: Coord, rotation: SelectionRotation) -> bool {
-        let built = {
-            let Some((environment, document, block)) = self.state.active_paste_mut() else {
-                return false;
-            };
-
-            clipboard::paste_block(document, &environment.tree, block, min, rotation)
-                .map(|built| (built, block.selection_mode()))
-        };
-
-        let Some(((action, target), selection_mode)) = built else {
+        let Some(block) = self.state.clipboard().cloned() else {
             return false;
         };
 
-        self.commit_selecting(
-            action,
-            SelectionMask {
-                bounds: target,
-                mode: selection_mode,
-            },
-        )
+        self.paste_floating(block, min, rotation)
+    }
+
+    fn paste_floating(&mut self, block: TileBlock, min: Coord, rotation: SelectionRotation) -> bool {
+        let built = {
+            let Some((environment, document)) = self.state.active_pair_mut() else {
+                return false;
+            };
+
+            clipboard::paste_block(document, &environment.tree, &block, min, rotation)
+        };
+
+        let (Some((action, bounds)), Some(document)) = (built, self.state.active()) else {
+            return false;
+        };
+
+        let group = EditGroupId::new();
+        let target = SelectionMask {
+            bounds,
+            mode: block.selection_mode(),
+        };
+        if !self.commit_selecting(action, target, Some(group)) {
+            return false;
+        }
+
+        self.floating_paste = Some(FloatingPaste {
+            document,
+            group,
+            block,
+            rotation,
+            target,
+        });
+
+        true
+    }
+
+    pub(super) fn live_floating_paste(&self) -> Option<&FloatingPaste> {
+        let floating = self.floating_paste.as_ref()?;
+        let document = self.state.active_document()?;
+
+        (document.id() == floating.document
+            && document.history.undo_group() == Some(floating.group)
+            && self.selection_mask() == Some(floating.target))
+        .then_some(floating)
+    }
+
+    pub(super) fn repaste_floating(&mut self, min: Coord, rotation: SelectionRotation) -> bool {
+        let Some(floating) = self.live_floating_paste() else {
+            return false;
+        };
+
+        if !self
+            .state
+            .active_document()
+            .is_some_and(|document| clipboard::can_paste(document, &floating.block, min, rotation))
+        {
+            return false;
+        }
+
+        let Some(floating) = self.floating_paste.take() else {
+            return false;
+        };
+
+        if !self.undo() {
+            self.floating_paste = Some(floating);
+
+            return false;
+        }
+
+        if self.paste_floating(floating.block.clone(), min, rotation) {
+            return true;
+        }
+
+        self.redo();
+        self.floating_paste = Some(floating);
+
+        false
     }
 }
 
@@ -164,7 +233,7 @@ mod tests {
     use dmm::{Coord, Map, Prefab, Size};
     use editor::{
         document::{MapDocument, PlacedPrefab, Selection},
-        tool::{BlockSelectionMode, SelectionMask, SelectionRotation, Tool},
+        tool::{BlockSelectionMode, SelectionMask, SelectionPlacement, SelectionRotation, Tool},
     };
 
     use crate::session::{
@@ -507,6 +576,130 @@ mod tests {
         assert!(!session.can_clear_tile(Coord::new(1, 1, 1)));
         assert!(!session.delete_selection());
         assert!(!session.state.active_document().unwrap().is_dirty());
+    }
+
+    fn wall_under_a_paste(width: u32, height: u32, wall: Coord) -> Session {
+        let mut session = flat_session(width, height);
+        place(&mut session, Prefab::new(TreePath::parse("/turf/closed/wall")), wall);
+        place(
+            &mut session,
+            Prefab::new(TreePath::parse("/obj/structure/table")),
+            Coord::new(1, 1, 1),
+        );
+        session.set_tool(Tool::BlockSelect);
+
+        session
+    }
+
+    #[test]
+    fn moving_a_fresh_paste_puts_back_what_it_covered() {
+        let wall = Coord::new(4, 1, 1);
+        let mut session = wall_under_a_paste(6, 1, wall);
+        assert!(session.copy_tile(Coord::new(1, 1, 1)));
+        let covered = session.state.active_document().unwrap().placed_tile(wall).unwrap();
+        let before_paste = session.map().unwrap().clone();
+
+        assert!(session.paste_clipboard(wall, SelectionRotation::Original));
+        assert_ne!(paths_at(&session, wall), ["/turf/closed/wall", "/area/station"]);
+        for min in [Coord::new(5, 1, 1), Coord::new(6, 1, 1)] {
+            assert!(session.place_selected_block_with_mode(
+                min,
+                SelectionRotation::Original,
+                SelectionPlacement::Move,
+                BlockSelectionMode::Full,
+            ));
+        }
+
+        let document = session.state.active_document().unwrap();
+        assert_eq!(document.placed_tile(wall).unwrap(), covered, "the wall keeps its ids");
+        assert_eq!(
+            paths_at(&session, Coord::new(5, 1, 1)),
+            ["/turf/open/floor", "/area/station"]
+        );
+        assert_eq!(
+            paths_at(&session, Coord::new(6, 1, 1)),
+            ["/obj/structure/table", "/turf/open/floor", "/area/station"]
+        );
+        assert_eq!(
+            session.selection(),
+            Some(Selection::from_drag(Coord::new(6, 1, 1), Coord::new(6, 1, 1)))
+        );
+        assert_eq!(session.undo_label(), Some("paste block"));
+        assert_render_cache_matches_rebuild(&session);
+
+        assert!(session.undo());
+        assert_eq!(*session.map().unwrap(), before_paste, "one undo takes the paste back");
+        assert_eq!(session.selection(), None);
+        assert!(session.redo());
+        assert_eq!(
+            paths_at(&session, Coord::new(6, 1, 1)),
+            ["/obj/structure/table", "/turf/open/floor", "/area/station"]
+        );
+    }
+
+    #[test]
+    fn rotating_a_fresh_non_square_paste_puts_back_what_it_covered() {
+        let wall = Coord::new(3, 2, 1);
+        let mut session = wall_under_a_paste(3, 3, wall);
+        assert!(session.select_block(Some(Selection::from_drag(Coord::new(1, 1, 1), Coord::new(2, 1, 1)))));
+        assert!(session.copy_selection(BlockSelectionMode::Full));
+        let covered = session.state.active_document().unwrap().placed_tile(wall).unwrap();
+        let before_paste = session.map().unwrap().clone();
+
+        assert!(session.paste_clipboard(Coord::new(2, 2, 1), SelectionRotation::Original));
+        assert_eq!(paths_at(&session, wall), ["/turf/open/floor", "/area/station"]);
+        assert!(session.rotate_selected_block());
+
+        assert_eq!(
+            session.state.active_document().unwrap().placed_tile(wall).unwrap(),
+            covered
+        );
+        assert_eq!(
+            session.selection(),
+            Some(Selection::from_drag(Coord::new(2, 2, 1), Coord::new(2, 3, 1)))
+        );
+        assert_eq!(
+            paths_at(&session, Coord::new(2, 3, 1)),
+            ["/obj/structure/table", "/turf/open/floor", "/area/station"]
+        );
+
+        assert!(session.undo());
+        assert_eq!(*session.map().unwrap(), before_paste);
+    }
+
+    #[test]
+    fn a_paste_stops_floating_after_another_edit_or_a_reselect() {
+        let wall = Coord::new(4, 1, 1);
+        let target = Selection::from_drag(wall, wall);
+        for is_reselected in [false, true] {
+            let mut session = wall_under_a_paste(6, 1, wall);
+            assert!(session.copy_tile(Coord::new(1, 1, 1)));
+            assert!(session.paste_clipboard(wall, SelectionRotation::Original));
+            if is_reselected {
+                assert!(session.select_block(Some(target)));
+            } else {
+                place(
+                    &mut session,
+                    Prefab::new(TreePath::parse("/obj/structure/table")),
+                    Coord::new(2, 1, 1),
+                );
+                session.set_tool(Tool::BlockSelect);
+                assert_eq!(session.selection(), Some(target));
+            }
+
+            assert!(session.place_selected_block_with_mode(
+                Coord::new(5, 1, 1),
+                SelectionRotation::Original,
+                SelectionPlacement::Move,
+                BlockSelectionMode::Full,
+            ));
+            assert_ne!(
+                paths_at(&session, wall)[0],
+                "/turf/closed/wall",
+                "is_reselected: {is_reselected}"
+            );
+            assert_eq!(session.undo_label(), Some("move block"));
+        }
     }
 
     #[test]

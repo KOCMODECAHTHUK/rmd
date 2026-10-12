@@ -319,13 +319,15 @@ impl Session {
     }
 
     /// Commits a block edit that leaves `after` selected, undo puts the old selection back
-    pub(super) fn commit_selecting(&mut self, mut action: ToolEdit, after: SelectionMask) -> bool {
+    pub(super) fn commit_selecting(
+        &mut self, mut action: ToolEdit, after: SelectionMask, group: Option<EditGroupId>,
+    ) -> bool {
         action.edit = action.edit.selecting(SelectionChange {
             before: self.selection_mask(),
             after: Some(after),
         });
 
-        if !self.commit(action, None) {
+        if !self.commit(action, group) {
             return false;
         }
 
