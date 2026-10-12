@@ -4,7 +4,7 @@ use core::{
     types::{Identifier, InputType, ListEntry, Value, VarModifiers, VarSpec},
 };
 
-use ast::{AST, AccessKind, ContextMacro, Expression, ExpressionId, ForLoop, Literal, Statement};
+use ast::{AST, AccessKind, ContextMacro, Expression, ExpressionId, ForLoop, Literal, Statement, constant::fold};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::*;
@@ -111,16 +111,35 @@ impl<'a> IrModuleBuilder<'a> {
         }
     }
 
-    pub fn lower_initializer(
+    pub fn lower_var_default(
+        &mut self, owner: TreePath, name: Identifier, ty: Option<TreePath>, initializer: Option<ExpressionId>,
+        dimensions: &[Option<ExpressionId>], location: Location,
+    ) -> Option<ProcId> {
+        match initializer {
+            Some(initializer) if fold(self.ast, initializer).is_constant() => None,
+            Some(initializer) => Some(self.lower_default_expr(owner, name, ty, initializer, location)),
+            None if dimensions.is_empty() => None,
+            None => Some(self.lower_default_list(owner, name, dimensions, location)),
+        }
+    }
+
+    fn lower_default_expr(
         &mut self, owner: TreePath, name: Identifier, ty: Option<TreePath>, expression: ExpressionId,
         location: Location,
     ) -> ProcId {
-        let id = self.lower_function(owner, name, &[], false, None, location, false, |this| {
+        // "Why the fuck are you lowering all runtime initializers into hidden functions???" you may ask.
+        // You need to understand the main purpose of this compiler first. We are not running the entire game, we are
+        // only running whatever we need. We don't need to initialize everything like the game does, if we did, we would
+        // have to spend huge amounts of time for unrelated default variable initializations. I've came up with this
+        // idea: "Hidden initializer procs". We encapsulate initializer into a hidden proc, we only call it when we
+        // need. This would be terrible idea for a game, but for an editor, it actually makes perfect sense once
+        // you think about it.
+        let func_id = self.lower_function(owner, name, &[], false, None, location, false, |this| {
             this.lower_statements(&[Statement::Return(Some(expression))])
         });
 
         if let Some(ty) = ty
-            && let Some(body) = self.module.proc(id).map(|proc| proc.body)
+            && let Some(body) = self.module.proc(func_id).map(|proc| proc.body)
             && let Some(instructions) = self.module.block(body).map(<[IrNodeId]>::to_vec)
             && let Some(IrNode::Return(Some(value))) = instructions.last().and_then(|id| self.module.node(*id))
         {
@@ -135,7 +154,21 @@ impl<'a> IrModuleBuilder<'a> {
             }
         }
 
-        id
+        func_id
+    }
+
+    /// `var/cache[8]` builds a fresh list for every instance even without an initializer.
+    fn lower_default_list(
+        &mut self, owner: TreePath, name: Identifier, dimensions: &[Option<ExpressionId>], location: Location,
+    ) -> ProcId {
+        self.lower_function(owner, name, &[], false, None, location, false, |this| {
+            let dimensions = dimensions
+                .iter()
+                .map(|dimension| dimension.map(|expression| this.lower_expr(expression)))
+                .collect::<Vec<_>>();
+            let list = this.declared_array(&dimensions);
+            this.terminate_current_block(IrNode::Return(Some(list)));
+        })
     }
 
     pub fn finish(self) -> Module { self.finish_with_optimizations(true).0 }
@@ -194,20 +227,6 @@ impl<'a> IrModuleBuilder<'a> {
                 this.lower_statements(body)
             },
         )
-    }
-
-    /// `var/cache[8]` builds a fresh list for every instance even without an initializer.
-    pub fn lower_sized_initializer(
-        &mut self, owner: TreePath, name: Identifier, dimensions: &[Option<ExpressionId>], location: Location,
-    ) -> ProcId {
-        self.lower_function(owner, name, &[], false, None, location, false, |this| {
-            let dimensions = dimensions
-                .iter()
-                .map(|dimension| dimension.map(|expression| this.lower_expr(expression)))
-                .collect::<Vec<_>>();
-            let list = this.declared_array(&dimensions);
-            this.terminate_current_block(IrNode::Return(Some(list)));
-        })
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -2693,7 +2712,7 @@ mod tests {
         let ast = ast::AST::new(Vec::new(), expressions);
 
         let mut builder = IrModuleBuilder::new(&ast);
-        builder.lower_initializer(TreePath::default(), "deep".into(), None, outermost, Location::default());
+        builder.lower_default_expr(TreePath::default(), "deep".into(), None, outermost, Location::default());
 
         let module = builder.finish();
         assert!(has(&module, "Trap"));

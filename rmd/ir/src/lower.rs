@@ -4,7 +4,7 @@ use core::{
     vars,
 };
 
-use ast::{AST, Declaration, constant::fold, intrinsic::intrinsic_marker};
+use ast::{AST, Declaration, intrinsic::intrinsic_marker};
 use objtree::{ObjectTree, TypeId};
 use prelude::Intrinsic;
 
@@ -65,16 +65,14 @@ impl Lowering<'_> {
                 let declared_type = var_type
                     .clone()
                     .or_else(|| (!declares).then(|| self.declared_type(id, &name)).flatten());
-                let runtime_initializer = match *initializer {
-                    Some(expr) => (!fold(self.ast, expr).is_constant()).then(|| {
-                        self.builder
-                            .lower_initializer(owner, name.clone(), declared_type, expr, *location)
-                    }),
-                    None => (!dimensions.is_empty()).then(|| {
-                        self.builder
-                            .lower_sized_initializer(owner, name.clone(), dimensions, *location)
-                    }),
-                };
+                let runtime_initializer = self.builder.lower_var_default(
+                    owner,
+                    name.clone(),
+                    declared_type,
+                    *initializer,
+                    dimensions,
+                    *location,
+                );
 
                 self.index.set_initializer(id, name, runtime_initializer);
             },
@@ -133,10 +131,14 @@ impl Lowering<'_> {
                 };
 
                 let declared_type = self.declared_type(id, name);
-                let runtime_initializer = (!fold(self.ast, *value).is_constant()).then(|| {
-                    self.builder
-                        .lower_initializer(prefix.clone(), name.clone(), declared_type, *value, *location)
-                });
+                let runtime_initializer = self.builder.lower_var_default(
+                    prefix.clone(),
+                    name.clone(),
+                    declared_type,
+                    Some(*value),
+                    &[],
+                    *location,
+                );
 
                 self.index.set_initializer(id, name.clone(), runtime_initializer);
             },
