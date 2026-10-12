@@ -1553,10 +1553,7 @@ impl Evaluator<'_> {
 
 impl Evaluator<'_> {
     fn read_vars(&mut self, id: ObjectId) -> Result<GenericValue> {
-        if let Some(list) = self.vars_lists.get(&id) {
-            return Ok(GenericValue::List(*list));
-        }
-
+        let cached = self.vars_lists.get(&id).copied();
         let object = self
             .runtime
             .heap
@@ -1583,7 +1580,9 @@ impl Evaluator<'_> {
 
         let mut names = names.into_iter().collect::<Vec<_>>();
         names.sort_by(|left, right| left.as_str().cmp(right.as_str()));
-        self.reserve(names.len())?;
+        if cached.is_none() {
+            self.reserve(names.len())?;
+        }
 
         let mut entries = Vec::with_capacity(names.len());
         for name in names {
@@ -1592,6 +1591,13 @@ impl Evaluator<'_> {
                 _ => self.read_field(GenericValue::Object(id), &name)?,
             };
             entries.push((GenericValue::Text(name.as_str().into()), Some(value)));
+        }
+
+        // one list per object, refreshed on every read so writes made since show up and edits to it don't stick
+        if let Some(list) = cached {
+            self.list_mut(list)?.replace(entries);
+
+            return Ok(GenericValue::List(list));
         }
 
         let list = self.list(entries)?;

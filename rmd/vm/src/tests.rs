@@ -2528,6 +2528,13 @@ fn initial_reads_the_builtin_type_vars() {
 }
 
 #[test]
+fn vars_reads_show_current_values() {
+    let result = run(fixture!("programs/vars_reads_show_current_values.dm"), "test");
+
+    assert_eq!(result, GenericValue::from("after kept same"));
+}
+
+#[test]
 fn a_scope_read_of_an_undeclared_var_faults() {
     let (tree, module) = compile(fixture!("programs/a_scope_read_of_an_undeclared_var_faults.dm"));
     let fault = Runtime::default()
