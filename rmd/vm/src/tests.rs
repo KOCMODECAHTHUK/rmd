@@ -2969,8 +2969,8 @@ fn a_bake_fault_reports_each_frame_line() {
 }
 
 #[test]
-fn a_ui_fault_stays_until_a_frame_succeeds() {
-    let (tree, module) = compile(fixture!("programs/a_ui_fault_stays_until_a_frame_succeeds.dm"));
+fn a_ui_fault_clears_when_the_target_changes() {
+    let (tree, module) = compile(fixture!("programs/a_ui_fault_clears_when_the_target_changes.dm"));
     let atom = Atom {
         instance: 1,
         ty: tree.id_of(&TreePath::parse("/turf/floor")).expect("floor should exist"),
@@ -2994,6 +2994,50 @@ fn a_ui_fault_stays_until_a_frame_succeeds() {
 
     bake.ui(&tree, &module, None, 0, Feedback::default())
         .expect("ui() draws nothing without a target");
+    assert!(bake.ui_fault.is_none());
+}
+
+#[test]
+fn a_ui_fault_from_an_interaction_stays_listed() {
+    let (tree, module) = compile(fixture!("programs/a_ui_fault_from_an_interaction_stays_listed.dm"));
+    let atom = Atom {
+        instance: 1,
+        ty: tree.id_of(&TreePath::parse("/turf/floor")).expect("floor should exist"),
+        position: Position::new(1, 1, 1),
+        vars: Vec::new(),
+    };
+    let mut bake = Bake::new(
+        &tree,
+        &module,
+        vec![atom],
+        [1, 1, 1],
+        Limits::default(),
+        IconStates::default(),
+    );
+    let slider = |hours: f32| Feedback {
+        values: HashMap::from([(String::from("Panel/Hour"), UiValue::Num(hours))]),
+        interacted: true,
+        ..Default::default()
+    };
+
+    bake.ui(&tree, &module, None, 0, Feedback::default())
+        .expect("an idle frame draws");
+    assert!(bake.ui_fault.is_none());
+
+    bake.ui(&tree, &module, None, 0, slider(14.0))
+        .expect_err("moving the slider reboots");
+    let fault = bake.ui_fault.as_ref().expect("the failed frame is kept");
+    assert_eq!(fault.location.begin.line, 13);
+
+    bake.ui(&tree, &module, None, 0, Feedback::default())
+        .expect("the idle frame after the fault draws");
+    assert!(
+        bake.ui_fault.is_some(),
+        "an idle frame must not forget what the interaction raised"
+    );
+
+    bake.ui(&tree, &module, None, 0, slider(10.0))
+        .expect("an interaction that changes nothing draws");
     assert!(bake.ui_fault.is_none());
 }
 

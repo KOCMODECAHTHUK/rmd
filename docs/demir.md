@@ -301,9 +301,9 @@ invalid reference in /obj/item/box::update_icon at code/obj/item/box.dm:532:1
 ```
 
 The editor writes each new fault to its log once, and **Window > Runtimes** lists the faults in
-each map's bake, grouped by hook. A `ui()` fault stays listed until a later frame succeeds. Repeated
-faults at the same line count as one entry. A failed appearance preview exports no changes. A failed
-`New()` call stops the remaining bake stages.
+each map's bake, grouped by hook. A `ui()` fault stays listed until a later interaction succeeds or
+you select another atom. Repeated faults at the same line count as one entry. A failed appearance
+preview exports no changes. A failed `New()` call stops the remaining bake stages.
 
 ## Development
 

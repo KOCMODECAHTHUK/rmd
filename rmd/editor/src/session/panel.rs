@@ -28,10 +28,14 @@ impl Session {
         replayed.mouse_popup_requested = false;
         let drawn = bake.ui(&program.tree, &program.module, target, dockspace, feedback);
         report_bake_output(bake);
+        let is_faulted = bake.ui_fault.is_some();
 
-        match drawn {
+        let frame = match drawn {
             Ok(frame) => {
-                self.logged_ui_fault = None;
+                if !is_faulted {
+                    self.logged_ui_fault = None;
+                }
+
                 if frame.committed {
                     for other in self.state.document_ids() {
                         if other != id {
@@ -55,7 +59,10 @@ impl Session {
 
                 editor::bake::UiFrame::default()
             },
-        }
+        };
+
+        self.log_runtimes();
+        frame
     }
 
     pub(super) fn replay_ui(&mut self, id: DocumentId, feedback: &editor::bake::UiFeedback) {
@@ -129,6 +136,7 @@ impl Session {
         let update = bake.rebake(&program.tree, &program.module, request);
         report_bake_output(bake);
 
+        self.collect_bake_diagnostics();
         self.apply_bake_update(
             id,
             editor::bake::BakeUpdate {
@@ -146,16 +154,34 @@ impl Session {
 #[cfg(test)]
 mod tests {
     use core::path::TreePath;
-    use std::collections::HashMap;
+    use std::{
+        collections::{HashMap, HashSet},
+        path::PathBuf,
+    };
 
     use dmm::{Coord, Map, Prefab, Size};
     use editor::document::{DocumentId, MapDocument, PrefabInstanceId};
     use vm::profile::ProfileHook;
 
     use crate::session::{
+        FaultState,
         Session,
-        fixtures::{examples, faulting_profile_session, settle_bake},
+        fixtures::{
+            examples,
+            faulting_profile_session,
+            highlight_toggle_fault_session,
+            interaction_fault_session,
+            settle_bake,
+        },
     };
+
+    fn listed(session: &Session) -> Vec<(Option<ProfileHook>, usize, FaultState)> {
+        session
+            .runtime_faults()
+            .iter()
+            .flat_map(|(_, faults)| faults.iter().map(|fault| (fault.hook, fault.count, fault.state)))
+            .collect()
+    }
 
     fn panel_session() -> Session {
         let root = examples();
@@ -275,5 +301,148 @@ mod tests {
             .map(|fault| (fault.hook, fault.fault.location.begin.line))
             .collect::<Vec<_>>();
         assert_eq!(listed, [(Some(ProfileHook::Bake), 6), (Some(ProfileHook::Ui), 9)]);
+    }
+
+    #[test]
+    fn a_ui_fault_from_an_interaction_survives_the_idle_frames_after_it() {
+        use editor::bake::{UiFeedback, UiValue};
+
+        let (mut session, _) = interaction_fault_session();
+        let slider = |hours: f32| UiFeedback {
+            values: HashMap::from([(String::from("Panel/Hour"), UiValue::Num(hours))]),
+            interacted: true,
+            ..Default::default()
+        };
+
+        assert!(!session.dm_ui(0, UiFeedback::default()).commands.is_empty());
+        assert_eq!(listed(&session), []);
+
+        assert!(session.dm_ui(0, slider(14.0)).commands.is_empty());
+        assert_eq!(listed(&session), [(Some(ProfileHook::Ui), 1, FaultState::Occurring)]);
+        assert!(session.logged_ui_fault.is_some());
+
+        assert!(!session.dm_ui(0, UiFeedback::default()).commands.is_empty());
+        assert_eq!(listed(&session), [(Some(ProfileHook::Ui), 1, FaultState::Occurring)]);
+        assert!(session.logged_ui_fault.is_some(), "the same fault is not logged again");
+
+        assert!(!session.dm_ui(0, slider(10.0)).commands.is_empty());
+        assert_eq!(
+            listed(&session),
+            [(Some(ProfileHook::Ui), 1, FaultState::Stopped)],
+            "a fault that stopped stays in the log",
+        );
+        assert!(session.logged_ui_fault.is_none());
+
+        session.clear_runtimes();
+        assert_eq!(listed(&session), []);
+    }
+
+    #[test]
+    #[ignore = "requires the local target/Vanderlin checkout"]
+    fn vanderlin_tallies_loot_and_shades_ambushes_within_budget() {
+        use editor::bake::{UiCommand, UiFeedback, UiValue};
+
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/Vanderlin");
+        let mut session = Session::new();
+        session
+            .load_environment(&root.join("vanderlin.dme"))
+            .expect("Vanderlin codebase");
+        session
+            .open_map(&root.join("_maps/map_files/vanderlin/vanderlin.dmm"), 1)
+            .expect("Vanderlin map");
+        settle_bake(&mut session);
+
+        let commands = session.dm_ui(0, UiFeedback::default()).commands;
+        let key = |prefix: &str| {
+            commands
+                .iter()
+                .find_map(|command| match command {
+                    UiCommand::Button { key, label } | UiCommand::Checkbox { key, label, .. }
+                        if label.starts_with(prefix) =>
+                    {
+                        Some(key.clone())
+                    },
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("the panel draws {prefix}"))
+        };
+        let tally = key("Tally loot");
+        let ambushable = key("Ambushable");
+
+        let pressed = session.dm_ui(
+            0,
+            UiFeedback {
+                clicks: HashSet::from([tally]),
+                interacted: true,
+                ..Default::default()
+            },
+        );
+        assert!(pressed.committed, "{:#?}", listed(&session));
+
+        let shaded = session.dm_ui(
+            0,
+            UiFeedback {
+                values: HashMap::from([(ambushable, UiValue::Bool(true))]),
+                interacted: true,
+                ..Default::default()
+            },
+        );
+        session.dm_ui_rebake(shaded.rebake);
+
+        let tallied = session
+            .dm_ui(0, UiFeedback::default())
+            .commands
+            .into_iter()
+            .any(|command| matches!(command, UiCommand::Text { text, .. } if text.starts_with("Spawners:")));
+        assert!(tallied, "the tally is shown");
+        assert_eq!(listed(&session), []);
+    }
+
+    #[test]
+    fn a_highlight_fault_stays_listed_after_its_checkbox_turns_off() {
+        use editor::bake::{UiFeedback, UiValue};
+
+        let (mut session, _) = highlight_toggle_fault_session();
+        let toggle = |session: &mut Session, show: bool| {
+            let frame = session.dm_ui(
+                0,
+                UiFeedback {
+                    values: HashMap::from([(String::from("Panel/Show"), UiValue::Bool(show))]),
+                    interacted: true,
+                    ..Default::default()
+                },
+            );
+            assert!(frame.committed);
+            session.dm_ui_rebake(frame.rebake);
+        };
+
+        session.dm_ui(0, UiFeedback::default());
+        assert_eq!(listed(&session), []);
+
+        toggle(&mut session, true);
+        assert_eq!(
+            listed(&session),
+            [(Some(ProfileHook::Highlights), 1, FaultState::Occurring)]
+        );
+
+        toggle(&mut session, false);
+        assert_eq!(
+            listed(&session),
+            [(Some(ProfileHook::Highlights), 1, FaultState::Stopped)]
+        );
+
+        toggle(&mut session, true);
+        assert_eq!(
+            listed(&session),
+            [(Some(ProfileHook::Highlights), 1, FaultState::Occurring)],
+            "the same fault comes back as one entry",
+        );
+
+        session.clear_runtimes();
+        assert_eq!(
+            listed(&session),
+            [(Some(ProfileHook::Highlights), 1, FaultState::Occurring)],
+            "clearing keeps what still faults",
+        );
     }
 }

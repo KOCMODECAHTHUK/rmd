@@ -881,6 +881,10 @@ impl UiState {
             self.copy_to_clipboard = runtimes.copy;
         }
 
+        if runtimes.clear {
+            session.clear_runtimes();
+        }
+
         if let Some((id, coord)) = git_output.center {
             self.center_view_on(session, id, coord);
         }

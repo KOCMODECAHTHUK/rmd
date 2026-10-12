@@ -41,8 +41,18 @@ mod panel;
 mod preview;
 mod search;
 
+use self::{
+    bake::report_bake_output,
+    diff::DiffState,
+    direction::direction_state,
+    edit::is_reorder_label,
+    highlight::always_highlighted,
+    level::MAX_MAP_DIMENSION,
+    node::NodeEditState,
+    preview::BlockPreviewCache,
+};
 pub(crate) use self::{
-    bake::RuntimeFault,
+    bake::{FaultState, RuntimeFault},
     blame::{BlameState, blame_color},
     codebase::{DiagnosticSeverity, LoadReport, MAX_REPORTED_DIAGNOSTICS, build_textures, discover_maps},
     coop::{Activity, Coop, CoopStatus, SharedState},
@@ -57,16 +67,6 @@ pub(crate) use self::{
     node::NodeOverlay,
     palette::{PrefabThumbnail, prefab_thumbnail_for, prefab_thumbnail_or_missing},
     preview::{BlockPreviewSource, PlacementPreview},
-};
-use self::{
-    bake::report_bake_output,
-    diff::DiffState,
-    direction::direction_state,
-    edit::is_reorder_label,
-    highlight::always_highlighted,
-    level::MAX_MAP_DIMENSION,
-    node::NodeEditState,
-    preview::BlockPreviewCache,
 };
 
 #[derive(Default)]
@@ -85,6 +85,7 @@ struct DocumentCache {
     pending_rebake: editor::bake::UiRebake,
     git: Option<GitDocState>,
     map_revision: u64,
+    runtimes: Vec<bake::LoggedFault>,
 }
 
 type SharedHighlights = Arc<[editor::bake::Highlight]>;

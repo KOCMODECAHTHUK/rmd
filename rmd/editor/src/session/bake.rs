@@ -31,10 +31,77 @@ pub(crate) struct RuntimeFault<'a> {
     pub hook: Option<ProfileHook>,
     pub fault: &'a vm::Fault,
     pub count: usize,
+    pub state: FaultState,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FaultState {
+    Occurring,
+    Stopped,
+}
+
+// the bake only tallies what its current state raises, a placement that re-runs takes its fault
+// back, so this keeps every fault a map raised until the user clears it
+#[derive(Debug)]
+pub(super) struct LoggedFault {
+    hook: Option<ProfileHook>,
+    key: vm::FaultKey,
+    fault: vm::Fault,
+    count: usize,
+    state: FaultState,
+}
+
+fn log_runtimes(bake: &editor::bake::Bake, log: &mut Vec<LoggedFault>) {
+    for logged in log.iter_mut() {
+        logged.state = FaultState::Stopped;
+    }
+
+    let raised = bake
+        .diagnostics
+        .entries
+        .iter()
+        .filter(|entry| entry.count > 0)
+        .map(|entry| (bake.hook_of(&entry.fault), &entry.fault, entry.count))
+        .chain(bake.ui_fault.iter().map(|fault| (Some(ProfileHook::Ui), fault, 1)));
+    for (hook, fault, count) in raised {
+        let key = fault.key();
+        match log.iter_mut().find(|logged| logged.hook == hook && logged.key == key) {
+            Some(logged) => {
+                logged.count = count;
+                logged.state = FaultState::Occurring;
+            },
+            None => log.push(LoggedFault {
+                hook,
+                key,
+                fault: fault.clone(),
+                count,
+                state: FaultState::Occurring,
+            }),
+        }
+    }
 }
 
 impl Session {
-    fn collect_bake_diagnostics(&mut self) {
+    // a map whose bake is still in flight keeps its log as it was
+    pub(super) fn log_runtimes(&mut self) {
+        for cache in self.caches.values_mut() {
+            if let Some(bake) = cache.bake.as_ref() {
+                log_runtimes(bake, &mut cache.runtimes);
+            }
+        }
+    }
+
+    pub(crate) fn clear_runtimes(&mut self) {
+        for cache in self.caches.values_mut() {
+            cache.runtimes.clear();
+        }
+
+        self.log_runtimes();
+    }
+
+    pub(super) fn collect_bake_diagnostics(&mut self) {
+        self.log_runtimes();
+
         self.diagnostics.bake = self
             .caches
             .values()
@@ -265,22 +332,17 @@ impl Session {
             .document_ids()
             .into_iter()
             .filter_map(|id| {
-                let bake = self.caches.get(&id)?.bake.as_ref()?;
-                let mut faults = bake
-                    .diagnostics
-                    .entries
+                let mut faults = self
+                    .caches
+                    .get(&id)?
+                    .runtimes
                     .iter()
-                    .filter(|entry| entry.count > 0)
-                    .map(|entry| RuntimeFault {
-                        hook: bake.hook_of(&entry.fault),
-                        fault: &entry.fault,
-                        count: entry.count,
+                    .map(|logged| RuntimeFault {
+                        hook: logged.hook,
+                        fault: &logged.fault,
+                        count: logged.count,
+                        state: logged.state,
                     })
-                    .chain(bake.ui_fault.iter().map(|fault| RuntimeFault {
-                        hook: Some(ProfileHook::Ui),
-                        fault,
-                        count: 1,
-                    }))
                     .collect::<Vec<_>>();
                 faults.sort_by_key(|fault| fault.hook.map_or(0, |hook| hook as usize + 1));
 

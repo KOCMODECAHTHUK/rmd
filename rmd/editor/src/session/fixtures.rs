@@ -266,8 +266,25 @@ pub(super) fn node_environment_with_profile(profile: &'static str) -> Environmen
 
 /// One floor tile whose profile faults in `bake()` and `ui()`
 pub(crate) fn faulting_profile_session() -> (Session, DocumentId) {
-    let environment =
-        node_environment_with_profile(include_str!("../../tests/fixtures/programs/runtime_faults_profile.dm"));
+    profile_session(include_str!("../../tests/fixtures/programs/runtime_faults_profile.dm"))
+}
+
+/// One floor tile whose `ui()` faults when its slider moves
+pub(crate) fn interaction_fault_session() -> (Session, DocumentId) {
+    profile_session(include_str!(
+        "../../tests/fixtures/programs/ui_interaction_fault_profile.dm"
+    ))
+}
+
+/// One floor tile whose `highlights()` faults while its checkbox is on
+pub(crate) fn highlight_toggle_fault_session() -> (Session, DocumentId) {
+    profile_session(include_str!(
+        "../../tests/fixtures/programs/highlight_toggle_fault_profile.dm"
+    ))
+}
+
+fn profile_session(profile: &'static str) -> (Session, DocumentId) {
+    let environment = node_environment_with_profile(profile);
     let document = MapDocument::new(node_map(1, 1, &[]), 1);
     let bake = editor::bake::build(&environment, &document).expect("the profile bakes");
     let mut session = Session::new();

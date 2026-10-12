@@ -1,11 +1,11 @@
 use std::hash::{DefaultHasher, Hash, Hasher};
 
-use dear_imgui_rs::{Condition, TreeNodeFlags, Ui, WindowKey, WindowKeyError};
+use dear_imgui_rs::{Condition, StyleColor, TreeNodeFlags, Ui, WindowKey, WindowKeyError};
 
 use super::common::{centered_note, dpi, focus_window_on_hover};
 use crate::{
     external_editor::SourceLocation,
-    session::{RuntimeFault, Session},
+    session::{FaultState, RuntimeFault, Session},
     settings::Settings,
 };
 
@@ -15,6 +15,7 @@ const RUNTIMES_WINDOW_SIZE: [f32; 2] = [560.0, 320.0];
 pub(super) struct RuntimesOutput {
     pub(super) open_source: Option<SourceLocation>,
     pub(super) copy: Option<String>,
+    pub(super) clear: bool,
 }
 
 pub(super) struct RuntimesPanel {
@@ -53,6 +54,10 @@ impl RuntimesPanel {
                     centered_note(ui, "No runtimes.");
                     return;
                 }
+
+                output.clear = ui.small_button("Clear");
+                ui.same_line();
+                ui.text_disabled("Faults that stopped are greyed out.");
 
                 for (position, (document, faults)) in maps.iter().enumerate() {
                     let title = session
@@ -106,7 +111,10 @@ fn draw_fault(ui: &Ui, session: &Session, fault: &RuntimeFault<'_>, output: &mut
         label.push_str(&format!(" at {}", location(error.location)));
     }
 
+    let stopped = (fault.state == FaultState::Stopped)
+        .then(|| ui.push_style_color(StyleColor::Text, ui.style_color(StyleColor::TextDisabled)));
     let node = ui.tree_node(format!("{label}###fault"));
+    drop(stopped);
     ui.same_line();
     if ui.small_button("Copy") {
         output.copy = Some(environment.fault_fault_report(error));

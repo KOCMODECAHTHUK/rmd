@@ -262,6 +262,7 @@ impl Session {
         self.maps = maps;
         self.state.environment = Some(Arc::new(environment));
         self.rebake_all();
+        self.clear_runtimes();
 
         report
     }

@@ -295,6 +295,7 @@ pub struct Bake {
     connection_index: HashMap<String, ConnectionChannel>,
     highlights: HashMap<u64, Vec<Highlight>>,
     highlight_faults: HashMap<u64, Fault>,
+    ui_fault_target: Option<u64>,
     type_groups: HashMap<TypeId, u32>,
     profile: ProfileDefinition,
 }
@@ -519,11 +520,19 @@ impl Bake {
             return Ok(crate::ui::Frame::default());
         };
 
-        let target = target.and_then(|id| self.objects.get(&id).copied());
+        let is_interaction = feedback.interacted;
+        let object = target.and_then(|id| self.objects.get(&id).copied());
         let frame = self
             .runtime
-            .ui_frame(tree, module, proc, target, dockspace, feedback, self.limits);
-        self.ui_fault = frame.as_ref().err().cloned();
+            .ui_frame(tree, module, proc, object, dockspace, feedback, self.limits);
+        match &frame {
+            Err(fault) => {
+                self.ui_fault = Some(fault.clone());
+                self.ui_fault_target = target;
+            },
+            Ok(_) if is_interaction || self.ui_fault_target != target => self.ui_fault = None,
+            Ok(_) => {},
+        }
 
         frame
     }
