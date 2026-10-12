@@ -1,3 +1,5 @@
+use std::hash::{DefaultHasher, Hash, Hasher};
+
 use dear_imgui_rs::{Condition, TreeNodeFlags, Ui, WindowKey, WindowKeyError};
 
 use super::common::{centered_note, dpi, focus_window_on_hover};
@@ -64,14 +66,14 @@ impl RuntimesPanel {
                     }
 
                     let mut previous_hook = None;
-                    for (index, fault) in faults.iter().enumerate() {
+                    for fault in faults {
                         let hook = Some(fault.hook);
                         if previous_hook != hook {
                             ui.text_disabled(fault.hook.map_or("setup", |hook| hook.name()));
                             previous_hook = hook;
                         }
 
-                        let _fault = ui.push_id(index);
+                        let _fault = ui.push_id(fault_id(fault));
                         draw_fault(ui, session, fault, &mut output);
                     }
                 }
@@ -104,7 +106,7 @@ fn draw_fault(ui: &Ui, session: &Session, fault: &RuntimeFault<'_>, output: &mut
         label.push_str(&format!(" at {}", location(error.location)));
     }
 
-    let node = ui.tree_node(label);
+    let node = ui.tree_node(format!("{label}###fault"));
     ui.same_line();
     if ui.small_button("Copy") {
         output.copy = Some(environment.fault_fault_report(error));
@@ -127,6 +129,13 @@ fn draw_fault(ui: &Ui, session: &Session, fault: &RuntimeFault<'_>, output: &mut
             None => ui.text(&text),
         }
     }
+}
+
+fn fault_id(fault: &RuntimeFault<'_>) -> usize {
+    let mut hasher = DefaultHasher::new();
+    (fault.hook, fault.fault.key()).hash(&mut hasher);
+
+    hasher.finish() as usize
 }
 
 #[cfg(test)]
