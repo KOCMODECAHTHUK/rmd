@@ -145,7 +145,8 @@
 // `matching` names one var or a list of vars. Two placements connect only when each named var
 // resolves to the same value, instance edits included.
 // Call this procedure only from the profile's New(). Repeat a subtype to add blockers or vars.
-// A conflicting non-null orientable subtype leaves that registration unchanged.
+// A conflicting non-null orientable subtype leaves that registration unchanged. Any other invalid
+// argument is a runtime error.
 /proc/demir_node_group(subtype, blocker, orientable_subtype = null, matching = null)
 	set __demir_intrin = 721
 

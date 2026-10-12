@@ -211,18 +211,22 @@ impl Evaluator<'_> {
                     return Err(self.fault(FaultKind::Blocked(format!("{name} outside a profile's New()"))));
                 }
 
+                let invalid = |what: &str, value: &GenericValue| {
+                    FaultKind::InvalidOperation(format!("{name} {what} must be a type, got {}", value.display()))
+                };
+
                 // which object
-                let Some(subtype) = args.first().and_then(|(_, value)| match value {
+                let subtype_arg = arg(0);
+                let Some(subtype) = (match &subtype_arg {
                     GenericValue::Path(path) => self.tree.id_of(path),
                     GenericValue::Object(id) => self.runtime.heap.object(*id).map(|object| object.ty),
                     _ => None,
                 }) else {
-                    return Ok(GenericValue::Null);
+                    return Err(self.fault(invalid("subtype", &subtype_arg)));
                 };
 
                 // which blocker
-                let blocker_arg = arg(1);
-                let blocker_values = match blocker_arg {
+                let blocker_values = match arg(1) {
                     GenericValue::Null => Vec::new(),
                     value @ (GenericValue::List(_) | GenericValue::ArgList(_)) => {
                         self.iter_values(value)?.into_iter().map(|(value, _)| value).collect()
@@ -234,17 +238,26 @@ impl Evaluator<'_> {
                     GenericValue::Object(id) => self.runtime.heap.object(*id).map(|object| object.ty),
                     _ => None,
                 };
-                let Some(blockers) = blocker_values.iter().map(resolve_type).collect::<Option<Vec<_>>>() else {
-                    return Ok(GenericValue::Null);
-                };
+                let mut blockers = Vec::with_capacity(blocker_values.len());
+                for value in &blocker_values {
+                    let Some(blocker) = resolve_type(value) else {
+                        return Err(self.fault(invalid("blocker", value)));
+                    };
+
+                    blockers.push(blocker);
+                }
 
                 // which orentation (optional)
                 let orientable_subtype = match arg(2) {
                     GenericValue::Null => None,
                     value => {
                         let Some(ty) = resolve_type(&value).filter(|ty| self.tree.is_subtype_of(*ty, subtype)) else {
-                            return Ok(GenericValue::Null);
+                            return Err(self.fault(FaultKind::InvalidOperation(format!(
+                                "{name} orientable_subtype must be a descendant of the subtype, got {}",
+                                value.display()
+                            ))));
                         };
+
                         Some(ty)
                     },
                 };
@@ -257,13 +270,17 @@ impl Evaluator<'_> {
                     },
                     value => vec![value],
                 };
-                let Some(matching) = matching_values
-                    .iter()
-                    .map(|value| value.text().map(Identifier::from))
-                    .collect::<Option<Vec<_>>>()
-                else {
-                    return Ok(GenericValue::Null);
-                };
+                let mut matching = Vec::with_capacity(matching_values.len());
+                for value in &matching_values {
+                    let Some(text) = value.text() else {
+                        return Err(self.fault(FaultKind::InvalidOperation(format!(
+                            "{name} matching must name vars as text, got {}",
+                            value.display()
+                        ))));
+                    };
+
+                    matching.push(Identifier::from(text));
+                }
 
                 if let Some(group) = self
                     .runtime

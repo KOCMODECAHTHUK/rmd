@@ -1129,9 +1129,8 @@ fn node_groups_accept_blocker_lists_merge_and_allow_an_unblocked_group() {
     let closed = tree.id_of(&TreePath::parse("/turf/closed")).unwrap();
     let grille = tree.id_of(&TreePath::parse("/obj/grille")).unwrap();
     let window = tree.id_of(&TreePath::parse("/obj/window")).unwrap();
-    let bad = tree.id_of(&TreePath::parse("/obj/bad")).unwrap();
 
-    assert_eq!(bake.node_groups().len(), 3);
+    assert_eq!(bake.node_groups().len(), 2);
     let cable_group = bake.node_groups().iter().find(|group| group.subtype == cable).unwrap();
     assert_eq!(cable_group.blockers, vec![closed, grille, window]);
     assert!(
@@ -1142,19 +1141,10 @@ fn node_groups_accept_blocker_lists_merge_and_allow_an_unblocked_group() {
             .blockers
             .is_empty()
     );
-    assert_eq!(
-        bake.node_groups()
-            .iter()
-            .find(|group| group.subtype == bad)
-            .unwrap()
-            .blockers,
-        vec![grille],
-        "an invalid blocker list does not partially update an existing group"
-    );
 }
 
 #[test]
-fn node_groups_accept_matching_vars_and_reject_non_text_names_atomically() {
+fn node_groups_accept_matching_vars() {
     let (tree, module) = compile(fixture!("programs/node_groups_accept_matching_vars.dm"));
     let bake = Bake::new(
         &tree,
@@ -1183,15 +1173,43 @@ fn node_groups_accept_matching_vars_and_reject_non_text_names_atomically() {
             Identifier::from("hidden"),
         ]
     );
-    assert_eq!(
-        matching("/obj/bad"),
-        vec![Identifier::from("piping_layer")],
-        "an invalid name list does not partially update an existing group"
-    );
 }
 
 #[test]
-fn node_groups_keep_valid_orientable_subtypes_and_reject_conflicts_atomically() {
+fn node_groups_reject_invalid_arguments() {
+    let (tree, module) = compile(fixture!("programs/node_groups_reject_invalid_arguments.dm"));
+    for (path, message) in [
+        ("/datum/demir/subtype", "demir_node_group subtype must be a type, got not a type"),
+        ("/datum/demir/blocker", "demir_node_group blocker must be a type, got not a type"),
+        (
+            "/datum/demir/orientable",
+            "demir_node_group orientable_subtype must be a descendant of the subtype, got /obj/other",
+        ),
+        ("/datum/demir/matching", "demir_node_group matching must name vars as text, got 2"),
+    ] {
+        let profile = tree.id_of(&TreePath::parse(path)).expect("profile");
+        let bake = Bake::new_with_profile(
+            &tree,
+            &module,
+            profile,
+            Vec::new(),
+            [1, 1, 1],
+            Limits::default(),
+            IconStates::default(),
+        );
+
+        assert_eq!(bake.diagnostics.count(), 1, "{path}");
+        assert_eq!(
+            bake.diagnostics.entries[0].fault.kind,
+            FaultKind::InvalidOperation(message.into()),
+            "{path}"
+        );
+        assert!(bake.node_groups().is_empty(), "{path}");
+    }
+}
+
+#[test]
+fn node_groups_keep_valid_orientable_subtypes_and_ignore_conflicts() {
     let (tree, module) = compile(fixture!("programs/node_groups_accept_orientable_subtypes.dm"));
     let bake = Bake::new(
         &tree,
