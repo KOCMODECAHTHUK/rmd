@@ -2381,6 +2381,18 @@ mod tests {
     }
 
     #[test]
+    fn a_named_variable_is_located_at_its_first_use() {
+        let module = lower(fixture!("programs/a_named_variable_is_located_at_its_first_use.dm"));
+        let procedure = &module.procs[0];
+        let uses = module
+            .named_variables(procedure)
+            .map(|(name, location)| (name.as_str(), location.begin.line))
+            .collect::<Vec<_>>();
+
+        assert_eq!(uses, [("LATER", 5)]);
+    }
+
+    #[test]
     fn nonlocal_variables_use_explicit_read_and_write_nodes() {
         let module = lower(fixture!(
             "programs/nonlocal_variables_use_explicit_read_and_write_nodes.dm"

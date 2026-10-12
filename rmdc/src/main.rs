@@ -312,7 +312,7 @@ fn bake_map(entry: &Path, map_path: &Path, summary: bool, check_edit: bool) -> R
     let uses = ir_module.procs.iter().flat_map(|procedure| {
         ir_module
             .named_variables(procedure)
-            .map(|name| (name.as_str(), procedure.location))
+            .map(|(name, location)| (name.as_str(), location))
     });
     for error in
         preprocessor::macros_used_before_definition(&preprocessed.defines, &preprocessed.sources, source_root, uses)

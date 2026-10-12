@@ -543,7 +543,7 @@ fn compile_view<'a>(
         let uses = module.procs.iter().flat_map(|procedure| {
             module
                 .named_variables(procedure)
-                .map(|name| (name.as_str(), procedure.location))
+                .map(|(name, location)| (name.as_str(), location))
         });
         let source_root = root.parent().unwrap_or(&root);
         errors.extend(macros_used_before_definition(

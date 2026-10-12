@@ -1,7 +1,7 @@
 pub use core::types::{IrNodeId, ProcId, ProcKind, ProcParam};
 use core::{
     interner::SymbolMap,
-    location::{LineTable, Location},
+    location::{LineTable, Location, SourceLine},
     path::TreePath,
     types::{Identifier, Value, VarSpec},
 };
@@ -523,13 +523,21 @@ impl Module {
         }
     }
 
-    /// Names a procedure left for the runtime to resolve, declared in its entry block
-    pub fn named_variables<'m>(&'m self, procedure: &Procedure) -> impl Iterator<Item = &'m Identifier> {
+    /// Names a procedure left for the runtime to resolve, declared in its entry block, each at the line of its
+    /// first use
+    pub fn named_variables<'m>(
+        &'m self, procedure: &'m Procedure,
+    ) -> impl Iterator<Item = (&'m Identifier, Location)> {
         self.block(procedure.body)
             .unwrap_or_default()
             .iter()
             .filter_map(|id| match self.node(*id) {
-                Some(IrNode::Variable(name)) => Some(name),
+                Some(IrNode::Variable(name)) => Some((
+                    name,
+                    self.node_lines
+                        .get(*id)
+                        .map_or(procedure.location, SourceLine::location),
+                )),
                 _ => None,
             })
     }
