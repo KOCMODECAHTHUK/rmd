@@ -402,6 +402,37 @@
 	target.demir_bake_appearance()
 	target.demir_tag_light()
 
+/atom/proc/demir_highlights()
+	return null
+
+/obj/machinery/camera/demir_highlights()
+	var/turf/origin = get_turf(src)
+	if(!origin)
+		return null
+
+	var/list/visible = list()
+	if(camera_status)
+		for(var/turf/T in view(CAM_RANGE, origin))
+			visible[T] = TRUE
+
+	var/list/seen = list()
+	var/list/blind = list()
+	for(var/turf/T as anything in block(origin.x - CAM_RANGE, origin.y - CAM_RANGE, origin.z, origin.x + CAM_RANGE, origin.y + CAM_RANGE))
+		if(visible[T])
+			seen += list(list(T.x - origin.x, T.y - origin.y))
+		else
+			blind += list(list(T.x - origin.x, T.y - origin.y))
+
+	var/when = DEMIR_HIGHLIGHT_SELECTED | DEMIR_HIGHLIGHT_HOVERED
+	return list(
+		list("tiles" = seen, "color" = "#40c040", "fill" = 0.25, "when" = when),
+		list("tiles" = blind, "color" = "#e04040", "fill" = 0.25, "when" = when),
+		list("x" = 0, "y" = 0, "width" = 1, "height" = 1, "fill" = 0, "outline" = 0, "when" = when, "label" = network),
+	)
+
+/datum/demir/goonstation/highlights(atom/target)
+	return target.demir_highlights()
+
 // RobustLight2 precomputes a point light's radius from its brightness and
 // height. Use that native calculation, then export the attenuation parameters
 // consumed by the editor's static lighting pass.

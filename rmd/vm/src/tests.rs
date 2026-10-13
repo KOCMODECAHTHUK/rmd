@@ -1818,6 +1818,75 @@ fn range_and_orange_spiral_out_with_areas_once() {
     );
 }
 
+/// What `view(2)` and `oview(2)` see from the centre of a 5 by 5 map.
+fn view_from_the_centre(walls: &[(i32, i32)], curtains: &[(i32, i32)]) -> String {
+    let (tree, module) = compile(fixture!("programs/view_from_the_centre.dm"));
+    let ty = |path: &str| tree.id_of(&TreePath::parse(path)).expect("fixture type");
+    let mut atoms = Vec::new();
+    for y in 1..=5 {
+        for x in 1..=5 {
+            let turf = if walls.contains(&(x, y)) {
+                "/turf/wall"
+            } else {
+                "/turf/floor"
+            };
+            for path in ["/area/zone", turf] {
+                atoms.push(Atom {
+                    instance: atoms.len() as u64 + 1,
+                    ty: ty(path),
+                    position: Position::new(x, y, 1),
+                    vars: Vec::new(),
+                });
+            }
+        }
+    }
+    for &(x, y) in curtains {
+        atoms.push(Atom {
+            instance: atoms.len() as u64 + 1,
+            ty: ty("/obj/curtain"),
+            position: Position::new(x, y, 1),
+            vars: Vec::new(),
+        });
+    }
+    let bake = Bake::new(
+        &tree,
+        &module,
+        atoms,
+        [5, 5, 1],
+        Limits::default(),
+        IconStates::default(),
+    );
+
+    assert_eq!(bake.diagnostics.count(), 0, "{:?}", bake.diagnostics);
+    bake.appearances[&26]
+        .vars
+        .iter()
+        .find(|(name, _)| name.as_str() == "name")
+        .and_then(|(_, value)| value.as_text())
+        .expect("the centre turf names what it saw")
+        .to_owned()
+}
+
+/// The wall and the curtain hide what is behind them, and together they close the diagonal between them.
+#[test]
+fn view_hides_cells_behind_opaque_atoms() {
+    assert_eq!(
+        view_from_the_centre(&[(4, 3)], &[(3, 4)]),
+        "3,3 2,2 2,3 2,4 3,2 3,4 4,2 4,3 1,1 1,2 1,3 1,4 1,5 2,1 2,5 3,1 4,1 5,1 5,2 | 2,2 2,3 2,4 3,2 3,4 4,2 4,3 \
+         1,1 1,2 1,3 1,4 1,5 2,1 2,5 3,1 4,1 5,1 5,2"
+    );
+}
+
+/// 3,5 is behind the pillar at 3,4, but both of its wall neighbours are seen.
+#[test]
+fn view_reveals_walls_between_seen_walls() {
+    assert_eq!(
+        view_from_the_centre(&[(3, 4), (2, 5), (3, 5), (4, 5)], &[]),
+        "3,3 2,2 2,3 2,4 3,2 3,4 4,2 4,3 4,4 1,1 1,2 1,3 1,4 1,5 2,1 2,5 3,1 3,5 4,1 4,5 5,1 5,2 5,3 5,4 5,5 | 2,2 \
+         2,3 2,4 3,2 3,4 4,2 4,3 4,4 1,1 1,2 1,3 1,4 1,5 2,1 2,5 3,1 3,5 4,1 4,5 5,1 5,2 5,3 5,4 5,5"
+    );
+}
+
 #[test]
 fn block_lists_turfs_inside_the_map() {
     let (tree, module) = compile(fixture!("programs/block_lists_turfs_inside_the_map.dm"));

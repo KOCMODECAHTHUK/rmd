@@ -115,7 +115,12 @@ impl Evaluator<'_> {
 
             Intrinsic::DmNewIcon => Ok(arg(0)),
             Intrinsic::Block => self.block(&positional()),
-            Intrinsic::Range | Intrinsic::Orange => self.range_list([arg(0), arg(1)], intrinsic == Intrinsic::Range),
+            Intrinsic::Range | Intrinsic::Orange => {
+                self.range_list([arg(0), arg(1)], intrinsic == Intrinsic::Range, Sight::Through)
+            },
+            Intrinsic::View | Intrinsic::Oview => {
+                self.range_list([arg(0), arg(1)], intrinsic == Intrinsic::View, Sight::Line)
+            },
             Intrinsic::DmIconSize => {
                 let icon = self.icon_file(arg(0));
                 let size = match &icon {
@@ -1239,7 +1244,6 @@ impl Evaluator<'_> {
             | Intrinsic::Obounds
             | Intrinsic::Ohearers
             | Intrinsic::Output
-            | Intrinsic::Oview
             | Intrinsic::Oviewers
             | Intrinsic::Params2list
             | Intrinsic::Pixloc
@@ -1272,7 +1276,6 @@ impl Evaluator<'_> {
             | Intrinsic::ValuesProduct
             | Intrinsic::ValuesSum
             | Intrinsic::Vector
-            | Intrinsic::View
             | Intrinsic::Viewers
             | Intrinsic::WalkAway
             | Intrinsic::WalkRand
@@ -1369,7 +1372,7 @@ impl Evaluator<'_> {
     }
 
     /// OpenDream's `HandleRange`. The arguments come in either order, and `"7x5"` spells a box.
-    fn range_list(&mut self, args: [GenericValue; 2], include_center: bool) -> Result<GenericValue> {
+    fn range_list(&mut self, args: [GenericValue; 2], include_center: bool, sight: Sight) -> Result<GenericValue> {
         let mut center = None;
         let mut size = (11, 11);
         for value in args {
@@ -1460,7 +1463,16 @@ impl Evaluator<'_> {
         if let Some(origin) = self.runtime.world.position(&self.runtime.heap, center) {
             let tiles = dantom_spiral((origin.x, origin.y), size);
             self.charge(tiles.len())?;
+            let visible = match sight {
+                Sight::Through => None,
+                Sight::Line => Some(self.visible_cells(origin, size)?),
+            };
+
             for (x, y) in tiles {
+                if visible.as_ref().is_some_and(|visible| !visible.contains(&(x, y))) {
+                    continue;
+                }
+
                 if let Some(turf) = self.runtime.world.turf_at(Position::new(x, y, origin.z)) {
                     self.range_add_with_contents(&mut entries, &mut areas, turf, None)?;
                 }
@@ -1520,6 +1532,50 @@ impl Evaluator<'_> {
         }
 
         self.list(entries)
+    }
+
+    fn visible_cells(&mut self, origin: Position, size: (i32, i32)) -> Result<HashSet<(i32, i32)>> {
+        let (low_x, low_y) = (origin.x - size.0 / 2, origin.y - size.1 / 2);
+        let mut grid = ViewGrid::new(size.0, size.1);
+        for grid_y in 0..size.1 {
+            for grid_x in 0..size.0 {
+                let position = Position::new(low_x + grid_x, low_y + grid_y, origin.z);
+                let Some(turf) = self.runtime.world.turf_at(position) else {
+                    continue;
+                };
+
+                let mut is_opaque = false;
+                let mut cell = vec![turf];
+                cell.extend(self.contents_of(turf));
+                for id in cell {
+                    if self
+                        .read_field(GenericValue::Object(id), &Identifier::from(vars::OPACITY))?
+                        .truthy()
+                    {
+                        is_opaque = true;
+                        break;
+                    }
+                }
+
+                grid.tiles[(grid_y * size.0 + grid_x) as usize] = Some(ViewTile {
+                    is_opaque,
+                    vis: 0,
+                    vis2: 0,
+                });
+            }
+        }
+
+        grid.calculate();
+        let mut visible = HashSet::new();
+        for grid_y in 0..size.1 {
+            for grid_x in 0..size.0 {
+                if grid.get(grid_x, grid_y).is_some_and(|tile| tile.vis != 0) {
+                    visible.insert((low_x + grid_x, low_y + grid_y));
+                }
+            }
+        }
+
+        Ok(visible)
     }
 
     fn range_finish(&mut self, entries: Vec<GenericValue>) -> Result<GenericValue> {
@@ -1619,6 +1675,162 @@ impl Evaluator<'_> {
             .alloc_list(ListData::new(entries))
             .map(GenericValue::List)
             .map_err(|kind| self.fault(kind))
+    }
+}
+
+#[derive(Clone, Copy)]
+enum Sight {
+    Through,
+    Line,
+}
+
+#[derive(Clone, Copy)]
+struct ViewTile {
+    is_opaque: bool,
+    vis: i32,
+    vis2: i32,
+}
+
+/// OpenDream's `ViewAlgorithm`, Lummox's description of BYOND's view() at
+/// https://www.byond.com/forum/post/2130277#comment20659267. Like OpenDream it skips the light and
+/// infrared steps, so dark tiles stay visible.
+struct ViewGrid {
+    width: i32,
+    height: i32,
+    tiles: Vec<Option<ViewTile>>,
+}
+
+impl ViewGrid {
+    fn new(width: i32, height: i32) -> Self {
+        Self {
+            width,
+            height,
+            tiles: vec![None; (width.max(0) * height.max(0)) as usize],
+        }
+    }
+
+    fn index(&self, x: i32, y: i32) -> Option<usize> {
+        let is_inside = x >= 0 && y >= 0 && x < self.width && y < self.height;
+        is_inside.then(|| (y * self.width + x) as usize)
+    }
+
+    fn get(&self, x: i32, y: i32) -> Option<ViewTile> { self.index(x, y).and_then(|index| self.tiles[index]) }
+
+    fn get_mut(&mut self, x: i32, y: i32) -> Option<&mut ViewTile> {
+        self.index(x, y).and_then(|index| self.tiles[index].as_mut())
+    }
+
+    fn calculate(&mut self) {
+        let (eye_x, eye_y) = (self.width / 2, self.height / 2);
+        let highest_max_delta = (self.width - eye_x).max(self.height - eye_y);
+        let highest_sum_delta = (self.width - eye_x) + (self.height - eye_y);
+
+        for d in 0..highest_max_delta {
+            let (lower_x, upper_x) = (eye_x - d - 1, eye_x + d + 1);
+            let (lower_y, upper_y) = (eye_y - d - 1, eye_y + d + 1);
+            for x in lower_x.max(0)..=upper_x.min(self.width - 1) {
+                let is_edge = x == lower_x || x == upper_x;
+                for y in lower_y.max(0)..=upper_y.min(self.height - 1) {
+                    if !is_edge && y != lower_y && y != upper_y {
+                        continue;
+                    }
+
+                    if self.neighbors_match(x, y, |tile| tile.vis2 == d)
+                        && let Some(tile) = self.get_mut(x, y)
+                    {
+                        tile.vis2 = if tile.is_opaque { -1 } else { d + 1 };
+                    }
+                }
+            }
+        }
+
+        for d in 0..highest_sum_delta {
+            for x in (eye_x - d - 1).max(0)..=(eye_x + d + 1).min(self.width - 1) {
+                let offset_y = (d + 1) - (eye_x - x).abs();
+                self.update_straight(x, eye_y - offset_y, d);
+                if offset_y != 0 {
+                    self.update_straight(x, eye_y + offset_y, d);
+                }
+            }
+        }
+
+        if let Some(eye) = self.get_mut(eye_x, eye_y) {
+            eye.vis = 1;
+        }
+
+        let mut boundaries = Vec::new();
+        for x in 0..self.width {
+            for y in 0..self.height {
+                let Some(tile) = self.get(x, y) else {
+                    continue;
+                };
+
+                if !tile.is_opaque || tile.vis != 0 {
+                    continue;
+                }
+
+                let is_seen = |x: i32, y: i32| self.get(x, y).is_some_and(|tile| tile.vis != 0);
+                let is_horizontal_wall = x != 0 && x != self.width - 1 && is_seen(x - 1, y) && is_seen(x + 1, y);
+                let is_vertical_wall = y != 0 && y != self.height - 1 && is_seen(x, y - 1) && is_seen(x, y + 1);
+                let is_corner = [(1, 1), (1, -1), (-1, -1), (-1, 1)]
+                    .into_iter()
+                    .any(|(dx, dy)| self.is_corner(x, y, dx, dy));
+                if is_horizontal_wall || is_vertical_wall || is_corner {
+                    boundaries.push((x, y));
+                }
+            }
+        }
+
+        for (x, y) in boundaries {
+            if let Some(tile) = self.get_mut(x, y) {
+                tile.vis = -1;
+            }
+        }
+    }
+
+    fn update_straight(&mut self, x: i32, y: i32, d: i32) {
+        if self.get(x, y).is_none() || !self.neighbors_match(x, y, |tile| tile.vis == d) {
+            return;
+        }
+
+        if let Some(tile) = self.get_mut(x, y) {
+            if tile.is_opaque {
+                tile.vis = -1;
+            } else if tile.vis2 != 0 {
+                tile.vis = d + 1;
+            }
+        }
+    }
+
+    fn neighbors_match(&self, x: i32, y: i32, matches: impl Fn(ViewTile) -> bool) -> bool {
+        for neighbor_x in x - 1..=x + 1 {
+            for neighbor_y in y - 1..=y + 1 {
+                if (neighbor_x, neighbor_y) == (x, y) {
+                    continue;
+                }
+
+                if self.get(neighbor_x, neighbor_y).is_some_and(&matches) {
+                    return true;
+                }
+            }
+        }
+
+        false
+    }
+
+    fn is_corner(&self, x: i32, y: i32, dx: i32, dy: i32) -> bool {
+        let (Some(diagonal), Some(first), Some(second)) =
+            (self.get(x + dx, y + dy), self.get(x, y + dy), self.get(x + dx, y))
+        else {
+            return false;
+        };
+
+        diagonal.vis != 0
+            && first.vis != 0
+            && second.vis != 0
+            && first.is_opaque
+            && second.is_opaque
+            && !diagonal.is_opaque
     }
 }
 
