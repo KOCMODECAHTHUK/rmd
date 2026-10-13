@@ -12,6 +12,8 @@
 #define USE_PERSPECTIVE_EDITOR_WALLS
 #endif
 
+#define DEMIR_GROUP_POWER (1<<0)
+
 /atom/proc/demir_prepare_state()
 	return
 
@@ -167,6 +169,45 @@
 
 /datum/demir/goonstation
 	default = TRUE
+	var/power_all = TRUE
+
+	New()
+		..()
+		demir_define_group(DEMIR_GROUP_POWER, /obj/machinery)
+
+// ui() rolls its writes back on every frame but the one the viewer touched something on, so the
+// profile's own vars are where panel state belongs.
+/datum/demir/goonstation/ui(atom/target)
+	if(!imgui_begin("Demir"))
+		imgui_end()
+		return
+
+	imgui_separator("Power")
+	var/is_powered_all = imgui_checkbox("All areas powered", src.power_all)
+	if(is_powered_all != src.power_all)
+		src.power_all = is_powered_all
+		demir_rebake(DEMIR_BAKE_LIGHT, DEMIR_GROUP_POWER)
+		demir_rebake(DEMIR_BAKE_APPEARANCE, DEMIR_GROUP_POWER)
+
+	imgui_end()
+
+// Unchecked shows the map unpowered, as if no APC were charged. Areas that need no power keep it.
+/proc/demir_area_powered(area/A, chan)
+	var/datum/demir/goonstation/profile = demir_profile()
+	if(profile.power_all)
+		return TRUE
+
+	return A && !A.requires_power
+
+/obj/machinery/powered(chan = EQUIP)
+	if(istype(loc, /obj/item/electronics/frame))
+		return FALSE
+
+	var/area/A = get_area(src)
+	if(!A)
+		return FALSE
+
+	return demir_area_powered(A, chan)
 
 /proc/getMaterial(mat)
 	if(!istext(mat))
@@ -481,33 +522,33 @@
 /obj/machinery/light_switch/demir_prepare_lights()
 	area = otherarea ? locate(text2path("/area/[otherarea]")) : get_area(src)
 	on = area ? area.lightswitch : on
-	light = demir_attach_light(0.3, on ? 0.5 : 1, on ? 1 : 0.5, 0.5, enabled = powered())
+	light = demir_attach_light(0.3, on ? 0.5 : 1, on ? 1 : 0.5, 0.5, enabled = FALSE)
 
 /obj/machinery/computer/demir_prepare_lights()
 	base_icon_state = initial(icon_state)
-	light = demir_attach_light(0.4, light_r, light_g, light_b, enabled = !(status & BROKEN) && powered())
+	light = demir_attach_light(0.4, light_r, light_g, light_b)
 
 /obj/machinery/computer3/demir_prepare_lights()
 	base_icon_state = icon_state
-	light = demir_attach_light(0.4, enabled = !(status & BROKEN) && powered())
+	light = demir_attach_light(0.4)
 
 /obj/machinery/vending/demir_prepare_lights()
-	light = demir_attach_light(0.6, light_r, light_g, light_b, 1.5, !fallen && !(status & BROKEN) && powered())
+	light = demir_attach_light(0.6, light_r, light_g, light_b, 1.5)
 
 /obj/machinery/r_door_control/demir_prepare_lights()
 	light = demir_attach_light(0.6, 0.9, 0.5, 0.5, 1.25)
 
 /obj/machinery/genetics_booth/demir_prepare_lights()
-	light = demir_attach_light(0.6, light_r, light_g, light_b, 1.5, powered())
+	light = demir_attach_light(0.6, light_r, light_g, light_b, 1.5)
 
 /obj/machinery/clothingbooth/demir_prepare_lights()
-	ambient_light = demir_attach_light(0.6, height = 1.5, enabled = powered())
+	ambient_light = demir_attach_light(0.6, height = 1.5)
 
 /obj/machinery/chemicompiler_stationary/demir_prepare_lights()
-	light = demir_attach_light(0.4, enabled = !(status & BROKEN) && powered())
+	light = demir_attach_light(0.4)
 
 /obj/machinery/disposal/chemlink/demir_prepare_lights()
-	light = demir_attach_light(0.4, 0.7, 1, 0.7, enabled = powered())
+	light = demir_attach_light(0.4, 0.7, 1, 0.7)
 
 /obj/machinery/atmospherics/unary/cryo_cell/demir_prepare_lights()
 	light = demir_attach_light(0.6, 0, 0.8, 0.5, 1.5, on)
@@ -551,6 +592,53 @@
 		if(light.enabled)
 			light.demir_export(src)
 
+/atom/proc/demir_set_light_enabled(datum/light/light, is_enabled)
+	if(is_enabled)
+		light.enable()
+	else
+		light.disable()
+
+// A rebake keeps the previous run's heap, so every power-dependent decision is made here.
+/obj/machinery/demir_apply_light()
+	if(powered())
+		status &= ~NOPOWER
+	else
+		status |= NOPOWER
+
+	return ..()
+
+/obj/machinery/light_switch/demir_apply_light()
+	demir_set_light_enabled(light, powered())
+	return ..()
+
+/obj/machinery/computer/demir_apply_light()
+	demir_set_light_enabled(light, !(status & BROKEN) && powered())
+	return ..()
+
+/obj/machinery/computer3/demir_apply_light()
+	demir_set_light_enabled(light, !(status & BROKEN) && powered())
+	return ..()
+
+/obj/machinery/vending/demir_apply_light()
+	demir_set_light_enabled(light, !fallen && !(status & BROKEN) && powered())
+	return ..()
+
+/obj/machinery/genetics_booth/demir_apply_light()
+	demir_set_light_enabled(light, powered())
+	return ..()
+
+/obj/machinery/clothingbooth/demir_apply_light()
+	demir_set_light_enabled(ambient_light, powered())
+	return ..()
+
+/obj/machinery/chemicompiler_stationary/demir_apply_light()
+	demir_set_light_enabled(light, !(status & BROKEN) && powered())
+	return ..()
+
+/obj/machinery/disposal/chemlink/demir_apply_light()
+	demir_set_light_enabled(light, powered())
+	return ..()
+
 // Areas and turfs can opt out of RobustLight2's darkness independently of
 // point lights. Ambient area colors are already stored in BYOND color form.
 /area/demir_apply_light()
@@ -566,21 +654,24 @@
 // The normal world startup calls power_change() before RobustLight2 starts.
 // Reproduce only the state decisions that select mapped, statically powered
 // fixtures; their game machinery and power networks remain stopped.
+/obj/machinery/light
+	var/demir_lit = FALSE
+
 /obj/machinery/light/proc/demir_is_on()
 	var/area/light_area = get_area(src)
-	return light_area && light_area.lightswitch && light_area.power_light
+	return light_area && light_area.lightswitch && demir_area_powered(light_area, LIGHT)
 
 /obj/machinery/light/emergency/demir_is_on()
 	var/area/light_area = get_area(src)
-	return light_area && (!light_area.power_light || shipAlertState == SHIP_ALERT_BAD)
+	return light_area && (!demir_area_powered(light_area, LIGHT) || shipAlertState == SHIP_ALERT_BAD)
 
 /obj/machinery/light/traffic_light/demir_is_on()
 	var/area/light_area = get_area(src)
-	return light_area && on && light_area.power_light
+	return light_area && on && demir_area_powered(light_area, LIGHT)
 
 /obj/machinery/light/lamp/demir_is_on()
 	var/area/light_area = get_area(src)
-	return light_area && switchon && light_area.power_light
+	return light_area && switchon && demir_area_powered(light_area, LIGHT)
 
 // These subtypes normally mark themselves broken in New(), which the preview
 // deliberately does not execute for mapped atoms.
@@ -608,10 +699,21 @@
 	return list(0.45, 0.75, 0.675)
 
 /obj/machinery/light/demir_apply_light()
-	if(!demir_is_on())
+	..()
+	demir_lit = demir_is_on()
+	if(!demir_lit)
 		return
+
 	var/list/source_color = demir_fixture_color()
 	demir_apply_point_light(brightness, source_color[1], source_color[2], source_color[3], 2.4)
+
+// Mapped fixtures keep their icon_state because New() never inserts a lamp for update_icon_state().
+/obj/machinery/light/demir_bake_icon()
+	..()
+	var/state_on = "[base_state]1"
+	var/state_off = "[base_state]0"
+	if(icon_state == state_on || icon_state == state_off)
+		icon_state = demir_lit ? state_on : state_off
 
 // Map lights are direct RobustLight2 sources. Their native constructor scales
 // the mapped brightness before enabling the point light.
@@ -620,5 +722,7 @@
 
 /datum/demir/goonstation/light(atom/target)
 	target.demir_apply_light()
+
+#undef DEMIR_GROUP_POWER
 
 #endif

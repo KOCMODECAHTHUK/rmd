@@ -7,6 +7,8 @@
 // static and hybrid lights are corner lights here, and movable lights are masks.
 #ifdef __DEMIR_BAKE__
 
+#define DEMIR_GROUP_POWER (1<<0)
+
 /datum/controller/global_vars/demir_preview/New()
 	GLOB = src
 	gvars_datum_init_order = list()
@@ -16,11 +18,75 @@
 
 /datum/demir/cmss13
 	default = TRUE
+	var/power_all = TRUE
 
 	New()
 		..()
 		if(!GLOB)
 			GLOB = new /datum/controller/global_vars/demir_preview
+
+		demir_define_group(DEMIR_GROUP_POWER, /obj/structure/machinery)
+
+// ui() rolls its writes back on every frame but the one the viewer touched something on, so panel
+// state lives in the profile's own vars.
+/datum/demir/cmss13/ui(atom/target)
+	if(!imgui_begin("Demir"))
+		imgui_end()
+		return
+
+	imgui_separator("Power")
+	var/powered_all = imgui_checkbox("All areas powered", src.power_all)
+	if(powered_all != src.power_all)
+		src.power_all = powered_all
+		demir_rebake(DEMIR_BAKE_LIGHT, DEMIR_GROUP_POWER)
+		demir_rebake(DEMIR_BAKE_APPEARANCE, DEMIR_GROUP_POWER)
+
+	imgui_end()
+
+/proc/demir_area_powered(area/A, chan)
+	var/datum/demir/cmss13/profile = demir_profile()
+	if(profile.power_all)
+		return TRUE
+
+	// Unchecked shows the map as if no APC were charged. Areas that need no power keep it.
+	return A && (!A.requires_power || A.unlimited_power)
+
+/obj/structure/machinery/powered(chan = -1)
+	if(!src.loc)
+		return 0
+
+	var/area/A = src.loc.loc
+	if(!A || !isarea(A))
+		return 0
+
+	if(chan == -1)
+		chan = power_channel
+
+	return demir_area_powered(A, chan)
+
+// Round start has not charged anything, and the native power_change() waits in a spawn() the bake
+// skips. This mirrors it, minus the redraw and the power draw bookkeeping.
+/obj/structure/machinery/demir_apply_light()
+	if(needs_power && !demir_area_powered(get_area(src), power_channel))
+		stat |= NOPOWER
+	else
+		stat &= ~NOPOWER
+
+	return ..()
+
+// LIGHT_OK is 0, and lightreplacer.dm undefines it before this profile is included. update() would
+// also wear the bulb out at random, so the state is set directly.
+/obj/structure/machinery/light/demir_apply_light()
+	var/area/fixture_area = get_area(src)
+	if(fixture_area)
+		var/is_switched = fixture_area.lightswitch
+		if(needs_power)
+			is_switched = is_switched && demir_area_powered(fixture_area, POWER_CHANNEL_LIGHT)
+
+		on = is_switched && status == 0
+		light_range = on ? brightness : 0
+
+	return ..()
 
 // Walls fill a shared damage overlay cache on first draw. Filling it here keeps it out of every
 // rolled-back preview.
@@ -35,19 +101,6 @@
 // `set_light_on(on)` from Initialize()
 /obj/item/device/flashlight/demir_prepare_state()
 	light_on = on
-
-// power_change() switches fixtures from the area a tick after they load. APCs drain and refill
-// the area's channels later still, so the mapped area vars stand in for them.
-/obj/structure/machinery/light/demir_prepare_state()
-	var/area/fixture_area = get_area(src)
-	if(!fixture_area)
-		return
-	var/switched = fixture_area.lightswitch
-	if(needs_power && !fixture_area.unlimited_power)
-		switched = switched && fixture_area.power_light
-	// LIGHT_OK is 0, and lightreplacer.dm undefines it before this profile is included.
-	on = switched && status == 0
-	light_range = on ? brightness : 0
 
 // update_icon() colors the screen by charge state and only lights a closed, working APC.
 // Round start has not charged anything yet. APC_NOT_CHARGING is 0 and apc.dm undefines it.
@@ -157,8 +210,22 @@
 	update_connections(FALSE)
 	update_icon()
 
-/obj/structure/machinery/light/demir_bake_icon()
+/obj/structure/machinery/demir_bake_icon()
 	update_icon()
+
+// These redraws read the static lighting queue or SShijack, which a bake never sets up, or assign
+// `overlays = 0`, which the VM rejects.
+/obj/structure/machinery/power/apc/demir_bake_icon()
+	return
+
+/obj/structure/machinery/fuelpump/demir_bake_icon()
+	return
+
+/obj/structure/machinery/portable_atmospherics/demir_bake_icon()
+	return
+
+/obj/structure/machinery/recharger/demir_bake_icon()
+	return
 
 /obj/structure/machinery/door/poddoor/demir_bake_icon()
 	update_icon()
@@ -221,5 +288,7 @@
 
 /datum/demir/cmss13/light(atom/target)
 	target.demir_apply_light()
+
+#undef DEMIR_GROUP_POWER
 
 #endif

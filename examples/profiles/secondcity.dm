@@ -16,6 +16,7 @@
 #define DEMIR_GROUP_DISPOSALS (1<<2)
 #define DEMIR_GROUP_UNDERFLOOR (DEMIR_GROUP_CABLES | DEMIR_GROUP_PIPES | DEMIR_GROUP_DISPOSALS)
 #define DEMIR_GROUP_FRILLS (1<<3)
+#define DEMIR_GROUP_POWER (1<<4)
 
 #define DEMIR_NODE_BLOCKERS list(/turf/closed, /obj/effect/spawner/structure/window)
 
@@ -407,6 +408,7 @@
 	var/show_pipes = TRUE
 	var/show_disposals = TRUE
 	var/fade_underfloor = FALSE
+	var/power_all = TRUE
 
 	New()
 		..()
@@ -422,6 +424,9 @@
 		demir_define_group(DEMIR_GROUP_PIPES, /obj/machinery/duct)
 		demir_define_group(DEMIR_GROUP_DISPOSALS, /obj/structure/disposalpipe)
 		demir_define_group(DEMIR_GROUP_DISPOSALS, /obj/structure/disposalconstruct)
+		demir_define_group(DEMIR_GROUP_POWER, /obj/machinery)
+		demir_define_group(DEMIR_GROUP_POWER, /turf/open/floor/circuit)
+		demir_define_group(DEMIR_GROUP_POWER, /obj/item/radio/intercom)
 		demir_define_group(DEMIR_GROUP_FRILLS, /turf/closed/wall/vampwall)
 
 		// The node tool copies the seeded map prefab along a cardinal route and keeps
@@ -484,6 +489,13 @@
 		src.fade_underfloor = fade
 		demir_rebake(DEMIR_BAKE_APPEARANCE, DEMIR_GROUP_UNDERFLOOR)
 
+	imgui_separator("Power")
+	var/powered_all = imgui_checkbox("All areas powered", src.power_all)
+	if(powered_all != src.power_all)
+		src.power_all = powered_all
+		demir_rebake(DEMIR_BAKE_LIGHT, DEMIR_GROUP_POWER)
+		demir_rebake(DEMIR_BAKE_APPEARANCE, DEMIR_GROUP_POWER)
+
 	imgui_end()
 
 /atom/proc/demir_prepare_state()
@@ -515,6 +527,18 @@
 /area/demir_prepare_state()
 	New()
 	return ..()
+
+// Inline in the switch's Initialize(). Its appearance and light read the area it controls.
+/obj/machinery/light_switch/demir_prepare_state()
+	..()
+	if(istext(area))
+		area = text2path(area)
+
+	if(ispath(area))
+		area = GLOB.areas_by_type[area]
+
+	if(!area)
+		area = get_area(src)
 
 /datum/demir/secondcity/prepare(atom/target)
 	target.demir_prepare_state()
@@ -558,6 +582,67 @@
 	..()
 	demir_bake_frill()
 
+/obj/machinery
+	var/demir_calculating_light = FALSE
+
+// Native power changes also redraw the machine. Leave that redraw to the appearance bake,
+// so it exports the native overlays rather than treating them as existing map appearance.
+/obj/machinery/update_appearance(updates = ALL)
+	if(demir_calculating_light)
+		return
+	return ..()
+
+/proc/demir_area_powered(area/A, chan)
+	var/datum/demir/secondcity/profile = demir_profile()
+	if(profile.power_all)
+		return TRUE
+
+	// Unchecked shows the map unpowered, as if no APC were charged. Areas that need no power keep it.
+	return A && !A.requires_power && A.powered(chan)
+
+/obj/machinery/powered(chan = power_channel, ignore_use_power = FALSE)
+	if(!use_power && !ignore_use_power)
+		return TRUE
+
+	return demir_area_powered(get_area(src), chan)
+
+/obj/machinery/proc/demir_power_change()
+	power_change()
+	// Subtype overrides set their light after ..(), which the guard above skipped.
+	update_appearance()
+
+// These redraws read subsystem or reagent state a bake never sets up.
+/obj/machinery/demir_bake_appearance()
+	var/static/list/skipped_types = list(
+		/obj/machinery/power/solar,
+		/obj/machinery/power/smes,
+		/obj/machinery/newscaster,
+		/obj/machinery/portable_atmospherics/canister,
+		/obj/machinery/digital_clock,
+		/obj/machinery/chem_master,
+		/obj/machinery/chem_mass_spec,
+		/obj/machinery/vatgrower,
+		/obj/machinery/stasis,
+		/obj/machinery/computer/station_alert,
+		/obj/machinery/status_display,
+		/obj/machinery/exoscanner,
+		/obj/machinery/barsign,
+	)
+	if(is_type_in_list(src, skipped_types))
+		return ..()
+
+	update_appearance()
+	return ..()
+
+/obj/item/radio/intercom/demir_bake_appearance()
+	on = demir_area_powered(get_area(src), AREA_USAGE_EQUIP)
+	update_appearance()
+	return ..()
+
+/turf/open/floor/circuit/demir_bake_appearance()
+	update_appearance()
+	return ..()
+
 /atom/proc/demir_finish_appearance()
 	return
 
@@ -591,10 +676,41 @@
 	demir_light_height = light_height
 
 // Fixtures ship with `on = FALSE`. Initialize() aims the light through setDir() and
-// post_machine_initialize() switches it on from the area's lightswitch and power.
+// post_machine_initialize() switches it on from the area's lightswitch and power, then always
+// runs update(). Their power_change() reads the raw area channel, so the checkbox is applied here.
 /obj/machinery/light/demir_apply_light()
 	setDir(dir)
-	power_change()
+	return ..()
+
+/obj/machinery/light/demir_power_change()
+	var/area/local_area = get_room_area()
+	on = local_area.lightswitch && demir_area_powered(local_area, AREA_USAGE_LIGHT) && status == LIGHT_OK
+	// update() wears the bulb on every switch, so a relight would otherwise keep raising the odds.
+	switchcount = 0
+	update(FALSE)
+	// Emergency power keeps the last light until the cell drains, which only processing does.
+	if(!on)
+		set_light(l_range = 0)
+
+// update_icon_state() lights the switch while its area is dark, powered or not, so it can be found.
+/obj/machinery/light_switch/demir_power_change()
+	..()
+	set_light(area.lightswitch ? 0 : light_on_range)
+
+/obj/machinery/demir_apply_light()
+	demir_calculating_light = TRUE
+	demir_power_change()
+	demir_calculating_light = FALSE
+	return ..()
+
+/turf/open/floor/circuit/demir_apply_light()
+	if(!always_off && demir_area_powered(get_area(src), AREA_USAGE_LIGHT))
+		on = TRUE
+		set_light_color(initial(light_color))
+		set_light(2, 1.5)
+	else
+		on = FALSE
+		set_light(0)
 	return ..()
 
 // Inline in the lava's Initialize(). Only lava bordering another turf casts light.
@@ -711,5 +827,6 @@
 #undef DEMIR_GROUP_DISPOSALS
 #undef DEMIR_GROUP_UNDERFLOOR
 #undef DEMIR_GROUP_FRILLS
+#undef DEMIR_GROUP_POWER
 
 #endif
