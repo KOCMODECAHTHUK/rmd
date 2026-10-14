@@ -40,13 +40,11 @@ pub(super) const DIALOG_FIELD_WIDTH: f32 = 320.0;
 
 const NEW_MAP_PATH_WIDTH: f32 = 460.0;
 
-const NEW_MAP_DEFAULT_WIDTH: i32 = 255;
+const NEW_MAP_DEFAULT_WIDTH: u32 = 255;
 
-const NEW_MAP_DEFAULT_HEIGHT: i32 = 255;
+const NEW_MAP_DEFAULT_HEIGHT: u32 = 255;
 
-const NEW_MAP_DEFAULT_LEVELS: i32 = 1;
-
-const NEW_MAP_MAX_DIMENSION: i32 = 255;
+const NEW_MAP_DEFAULT_LEVELS: u32 = 1;
 
 pub(super) const SAVE_MAP_POPUP: &str = "Save map##save-map";
 
@@ -115,9 +113,9 @@ pub(super) enum SaveDialogOutcome {
 pub(super) struct NewMapDialog {
     pub(super) path: String,
     format: MapFormat,
-    width: i32,
-    height: i32,
-    levels: i32,
+    width: u32,
+    height: u32,
+    levels: u32,
     pub(super) error: Option<String>,
 }
 
@@ -218,18 +216,18 @@ impl DeleteLevelDialog {
 
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct ResizeMapDialog {
-    width: i32,
-    height: i32,
+    width: u32,
+    height: u32,
     fill: TileFillSearch,
-    losses: Option<(i32, i32, Vec<Prefab>, usize)>,
+    losses: Option<(u32, u32, Vec<Prefab>, usize)>,
     error: Option<String>,
 }
 
 impl ResizeMapDialog {
     pub(super) fn new(size: Size, fill: TileFillSearch) -> Self {
         Self {
-            width: size.x as i32,
-            height: size.y as i32,
+            width: size.x,
+            height: size.y,
             fill,
             losses: None,
             error: None,
@@ -344,8 +342,8 @@ pub(super) fn draw_new_map_dialog(ui: &Ui, session: &mut Session, dialog: &mut O
     ] {
         ui.text(label);
         ui.set_next_item_width(NEW_MAP_PATH_WIDTH * dpi(ui));
-        ui.drag_int_config(id)
-            .range(1, NEW_MAP_MAX_DIMENSION)
+        ui.drag_config(id)
+            .range(1, u32::MAX)
             .flags(DragFlags::ALWAYS_CLAMP)
             .build(ui, value);
     }
@@ -365,7 +363,7 @@ pub(super) fn draw_new_map_dialog(ui: &Ui, session: &mut Session, dialog: &mut O
 
     let valid_dimensions = [state.width, state.height, state.levels]
         .into_iter()
-        .all(|dimension| (1..=NEW_MAP_MAX_DIMENSION).contains(&dimension));
+        .all(|dimension| dimension > 0);
     let can_create = !state.path.trim().is_empty() && valid_dimensions;
     let clicked = {
         let _disabled = ui.begin_disabled_with_cond(!can_create);
@@ -383,9 +381,9 @@ pub(super) fn draw_new_map_dialog(ui: &Ui, session: &mut Session, dialog: &mut O
                     .create_map(
                         &path,
                         Size {
-                            x: state.width as u32,
-                            y: state.height as u32,
-                            z: state.levels as u32,
+                            x: state.width,
+                            y: state.height,
+                            z: state.levels,
                         },
                         state.format,
                     )
@@ -435,8 +433,8 @@ pub(super) fn draw_resize_map_dialog(
     ] {
         ui.text(label);
         ui.set_next_item_width(DIALOG_FIELD_WIDTH * dpi(ui));
-        ui.drag_int_config(id)
-            .range(1, NEW_MAP_MAX_DIMENSION)
+        ui.drag_config(id)
+            .range(1, u32::MAX)
             .flags(DragFlags::ALWAYS_CLAMP)
             .build(ui, value);
     }
@@ -452,7 +450,7 @@ pub(super) fn draw_resize_map_dialog(
             *losses
         },
         (_, Some(fill)) => {
-            let losses = session.resize_losses(width as u32, height as u32, fill);
+            let losses = session.resize_losses(width, height, fill);
             state.losses = Some((width, height, fill.clone(), losses));
             losses
         },
@@ -480,7 +478,7 @@ pub(super) fn draw_resize_map_dialog(
     }
 
     ui.same_line();
-    let changed = (width as u32, height as u32) != (size.x, size.y);
+    let changed = (width, height) != (size.x, size.y);
     let clicked = {
         let _disabled = ui.begin_disabled_with_cond(!changed || fill.is_none());
 
@@ -491,7 +489,7 @@ pub(super) fn draw_resize_map_dialog(
         && clicked
         && let Some(fill) = fill
     {
-        match session.resize_map(width as u32, height as u32, &fill) {
+        match session.resize_map(width, height, &fill) {
             Ok(()) => {
                 state.fill.remember(session, remembered_fill);
                 resized = true;
@@ -1098,6 +1096,7 @@ mod tests {
         draw_go_to_dialog,
         draw_keybind_preset_dialog,
         draw_new_level_dialog,
+        draw_new_map_dialog,
         draw_resize_map_dialog,
         resolve_new_map_path,
     };
@@ -1281,6 +1280,27 @@ mod tests {
                 center
             })
             .collect::<Vec<_>>()
+    }
+
+    fn click_dialog_button(
+        context: &mut dear_imgui_rs::Context, name: &CStr, labels: &[&str], mut draw: impl FnMut(&Ui),
+    ) {
+        let mut point = [0.0, 0.0];
+        for _ in 0..4 {
+            let ui = context.frame();
+            ui.open_popup(name.to_str().unwrap());
+            draw(ui);
+            point = *button_centers(ui, name, labels).last().unwrap();
+            assert!(context.render_legacy().valid());
+        }
+
+        for down in [false, true, false] {
+            context.io_mut().add_mouse_pos_event(point);
+            context.io_mut().add_mouse_button_event(MouseButton::Left, down);
+            let ui = context.frame();
+            draw(ui);
+            assert!(context.render_legacy().valid());
+        }
     }
 
     struct TestDirectory(PathBuf);
@@ -1817,6 +1837,82 @@ mod tests {
     }
 
     #[test]
+    fn the_resize_dialog_accepts_dimensions_above_255() {
+        let _guard = IMGUI_CONTEXT.lock().unwrap();
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/env");
+        for (width, height) in [(256, 1), (1, 256)] {
+            let mut context = rectangle_context();
+            let mut session = Session::new();
+            session.load_environment(&root.join("test.dme")).unwrap();
+            session
+                .state
+                .open_document(MapDocument::new(Map::new(Size { x: 1, y: 1, z: 1 }), 1));
+            let fill = session.default_fill().unwrap();
+            let mut dialog = Some(ResizeMapDialog::new(
+                session.map().unwrap().size(),
+                TileFillSearch::new(&session, None),
+            ));
+            dialog.as_mut().unwrap().width = width;
+            dialog.as_mut().unwrap().height = height;
+            let mut remembered = None;
+            let mut resized = false;
+
+            click_dialog_button(&mut context, c"Resize map##resize-map", &["Cancel", "Resize"], |ui| {
+                resized |= draw_resize_map_dialog(ui, &mut session, &mut dialog, &mut remembered)
+            });
+
+            assert!(resized);
+            assert!(dialog.is_none());
+            assert_eq!(
+                session.map().unwrap().size(),
+                Size {
+                    x: width,
+                    y: height,
+                    z: 1,
+                }
+            );
+            assert_eq!(
+                session.map().unwrap().tile_at(Coord::new(width, height, 1)),
+                Some(&fill)
+            );
+        }
+    }
+
+    #[test]
+    fn the_resize_dialog_preserves_dimensions_up_to_u32_max() {
+        let _guard = IMGUI_CONTEXT.lock().unwrap();
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/env");
+        let mut session = Session::new();
+        session.load_environment(&root.join("test.dme")).unwrap();
+        session
+            .state
+            .open_document(MapDocument::new(Map::new(Size { x: 1, y: 1, z: 1 }), 1));
+
+        for dimension in [i32::MAX as u32 + 1, u32::MAX] {
+            let mut context = rectangle_context();
+            let mut dialog = Some(ResizeMapDialog::new(
+                Size {
+                    x: dimension,
+                    y: dimension,
+                    z: 1,
+                },
+                TileFillSearch::new(&session, None),
+            ));
+            let mut remembered = None;
+
+            let ui = context.frame();
+            ui.open_popup(RESIZE_MAP_POPUP);
+            assert!(!draw_resize_map_dialog(ui, &mut session, &mut dialog, &mut remembered));
+            assert!(context.render_legacy().valid());
+
+            let state = dialog.unwrap();
+            assert_eq!((state.width, state.height), (dimension, dimension));
+            assert_eq!(state.losses.unwrap().0, dimension);
+            assert_eq!(session.map().unwrap().size(), Size { x: 1, y: 1, z: 1 });
+        }
+    }
+
+    #[test]
     fn first_launch_opens_the_keybinding_preset_dialog() {
         let _context = IMGUI_CONTEXT.lock().unwrap();
         let mut context = dear_imgui_rs::Context::create();
@@ -1844,6 +1940,75 @@ mod tests {
         assert_eq!(dialog.format, MapFormat::Tgm);
         assert_eq!((dialog.width, dialog.height, dialog.levels), (255, 255, 1));
         assert!(dialog.error.is_none());
+    }
+
+    #[test]
+    fn the_new_map_dialog_accepts_dimensions_above_255() {
+        let _guard = IMGUI_CONTEXT.lock().unwrap();
+        let directory = TestDirectory::new("large-map-dialog");
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/env");
+        let mut session = Session::new();
+        session.load_environment(&root.join("test.dme")).unwrap();
+        let fill = session.default_fill().unwrap();
+
+        for (width, height, levels) in [(256, 1, 1), (1, 256, 1), (1, 1, 256)] {
+            let mut context = rectangle_context();
+            let path = directory.0.join(format!("map-{width}-{height}-{levels}.dmm"));
+            let mut dialog = Some(NewMapDialog {
+                path: path.to_str().unwrap().to_owned(),
+                width,
+                height,
+                levels,
+                ..NewMapDialog::default()
+            });
+            let mut created = false;
+
+            click_dialog_button(&mut context, c"New map##new-map", &["Cancel", "Create"], |ui| {
+                created |= draw_new_map_dialog(ui, &mut session, &mut dialog).1;
+            });
+
+            assert!(created);
+            assert!(dialog.is_none());
+            let document = session.state.active_document().unwrap();
+            assert_eq!(document.path.as_deref(), Some(path.as_path()));
+            assert_eq!(
+                document.map.size(),
+                Size {
+                    x: width,
+                    y: height,
+                    z: levels,
+                }
+            );
+            assert_eq!(document.map.tile_at(Coord::new(width, height, levels)), Some(&fill));
+        }
+    }
+
+    #[test]
+    fn the_new_map_dialog_preserves_dimensions_up_to_u32_max() {
+        let _guard = IMGUI_CONTEXT.lock().unwrap();
+        let mut session = Session::new();
+
+        for dimension in [i32::MAX as u32 + 1, u32::MAX] {
+            let mut context = rectangle_context();
+            let mut dialog = Some(NewMapDialog {
+                width: dimension,
+                height: dimension,
+                levels: dimension,
+                ..NewMapDialog::default()
+            });
+
+            let ui = context.frame();
+            ui.open_popup(super::NEW_MAP_POPUP);
+            assert_eq!(draw_new_map_dialog(ui, &mut session, &mut dialog), (false, false));
+            assert!(context.render_legacy().valid());
+
+            let state = dialog.unwrap();
+            assert_eq!(
+                (state.width, state.height, state.levels),
+                (dimension, dimension, dimension)
+            );
+            assert!(session.state.active_document().is_none());
+        }
     }
 
     #[test]

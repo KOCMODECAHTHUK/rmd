@@ -48,7 +48,6 @@ use self::{
     direction::direction_state,
     edit::is_reorder_label,
     highlight::always_highlighted,
-    level::MAX_MAP_DIMENSION,
     node::NodeEditState,
     preview::BlockPreviewCache,
 };
