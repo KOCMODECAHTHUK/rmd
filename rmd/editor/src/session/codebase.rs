@@ -445,13 +445,7 @@ mod tests {
         assert_eq!(report.errors, 1);
         assert!(report.error_lines[0].starts_with("maps/level.dmm: Map error"));
         assert_eq!(report.warnings, 1);
-        assert_eq!(
-            report.warning_lines,
-            [
-                "maps/level.dmm: unknown type path /obj/missing (unused dictionary entry; not found in the loaded \
-                 codebase)"
-            ]
-        );
+        assert_eq!(report.warning_lines, ["maps/level.dmm: unknown type path /obj/missing"]);
 
         let failed = LoadReport::failure(
             "maps/level.dmm",
@@ -489,10 +483,7 @@ b
             assert_eq!(report.warnings, 1);
             assert_eq!(
                 report.warning_lines,
-                [
-                    "maps/level.dmm: unknown type path /obj/a_unused (unused dictionary entry; not found in the \
-                     loaded codebase)"
-                ]
+                ["maps/level.dmm: unknown type path /obj/a_unused"]
             );
             assert!(LoadReport::map("maps/level.dmm", &map, None, &errors).is_empty());
         }
