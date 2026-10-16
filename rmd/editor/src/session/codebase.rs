@@ -272,7 +272,7 @@ impl Session {
     pub(crate) fn type_source(&self, id: TypeId) -> Option<SourceLocation> {
         let environment = self.state.environment.as_ref()?;
         let location = environment.tree.get(id)?.location.get();
-        if location.begin.line == 0 || location.begin.col == 0 {
+        if environment.is_builtin_file(location.file) || location.begin.line == 0 || location.begin.col == 0 {
             return None;
         }
 
@@ -354,6 +354,27 @@ mod tests {
         assert_eq!(source.path, PathBuf::from("code/items.dm"));
         assert_eq!(source.line, 42);
         assert_eq!(source.column, 7);
+    }
+
+    #[test]
+    fn type_sources_use_builtin_file_ids_instead_of_paths() {
+        let location = Location::in_file(FileId(0), Position::new(42, 7), Position::new(42, 16));
+        let mut tree = ObjectTree::new();
+        let builtin = tree.register(&TreePath::parse("/obj/builtin"), location);
+        let project = tree.register(&TreePath::parse("/obj/project"), location.with_file(FileId(1)));
+        let mut environment = Environment::new("station.dme", tree);
+        environment
+            .files
+            .extend(["code/embedded.dm", "code/stddef_ext.dm"].map(PathBuf::from));
+        environment.builtin_files.push(FileId(0));
+        let mut session = Session::new();
+        session.state.environment = Some(Arc::new(environment));
+
+        assert!(session.type_source(builtin).is_none());
+        let source = session
+            .type_source(project)
+            .expect("project source named like a builtin");
+        assert_eq!(source.path, PathBuf::from("code/stddef_ext.dm"));
     }
 
     #[test]
