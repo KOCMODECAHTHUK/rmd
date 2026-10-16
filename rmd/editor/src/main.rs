@@ -725,7 +725,8 @@ impl App {
     }
 
     fn open_source(&mut self, source: SourceLocation) {
-        if let Err(error) = external_editor::open(&self.settings.preferred_editor, &source) {
+        if let Err(error) = external_editor::open(&self.settings.preferred_editor, &source, self.session.codebase_dir())
+        {
             log::error!(
                 "opening {}:{}:{} in the preferred editor: {error}",
                 source.path.display(),

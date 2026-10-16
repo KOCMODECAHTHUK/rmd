@@ -391,7 +391,8 @@ fn draw_general_settings(ui: &Ui, settings: &mut Settings) {
     ui.set_next_item_width(-1.0);
     ui.input_text("##preferred-editor", &mut settings.preferred_editor)
         .build();
-    ui.text_disabled("Placeholders: {file}, {line}, {column}");
+    ui.text_disabled("Placeholders: {file}, {line}, {column}, {root}");
+    ui.text_disabled("{root} is the workspace directory containing the loaded .dme file.");
 
     ui.separator();
     draw_section_heading(ui, "Saving");
