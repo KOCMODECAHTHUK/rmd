@@ -18,7 +18,7 @@ use core::{
     arena::StrArena,
     location::{FileId, Location},
     path::TreePath,
-    source::SourceMap,
+    source::{SourceMap, read_source},
     types::ProcId,
 };
 use std::{
@@ -116,7 +116,7 @@ fn parse_entry_selection(args: Vec<String>, allow_all: bool) -> Option<EntrySele
 }
 
 fn dump_tokens(path: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
-    let source = std::fs::read_to_string(path)?;
+    let source = read_source(path)?;
     let (tokens, errors) = lexer::tokenize(&source);
 
     for (token, location) in &tokens {

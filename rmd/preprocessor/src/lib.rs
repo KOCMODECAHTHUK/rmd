@@ -6,7 +6,7 @@ pub mod eval;
 use core::{
     arena::StrArena,
     location::{FileId, Location},
-    source::SourceMap,
+    source::{SourceMap, read_source},
 };
 use std::{
     collections::{HashMap, HashSet},
@@ -1540,7 +1540,7 @@ impl<'a> Preprocessor<'a> {
 
         let contents = match self.source_cache.files.get(&path).copied() {
             Some(contents) => contents,
-            None => match std::fs::read_to_string(&path) {
+            None => match read_source(&path) {
                 Ok(contents) => {
                     let contents = self.arena.alloc(contents);
                     self.source_cache.files.insert(path.clone(), contents);
@@ -1557,6 +1557,7 @@ impl<'a> Preprocessor<'a> {
                         location,
                         format!("could not read \"{}\": {error}", path.display()),
                     );
+
                     return;
                 },
             },
@@ -1773,7 +1774,7 @@ mod tests {
     }
 
     /// [`pp`], also handing back what the run complained about.
-    fn pp_with_errors(files: &[(&str, &str)]) -> (String, Vec<String>) {
+    fn pp_with_errors(files: &[(&str, impl AsRef<[u8]>)]) -> (String, Vec<String>) {
         static NEXT: AtomicUsize = AtomicUsize::new(0);
 
         let id = NEXT.fetch_add(1, Ordering::Relaxed);
@@ -1791,7 +1792,7 @@ mod tests {
             .run(dir.join(files[0].0))
             .expect("preprocess");
         let rendered = render(&result.tokens);
-        let errors = result.errors.iter().map(ToString::to_string).collect();
+        let errors = result.errors.iter().map(ToString::to_string).collect::<Vec<_>>();
         let _ = fs::remove_dir_all(&dir);
 
         (rendered, errors)
@@ -1980,6 +1981,84 @@ mod tests {
 
         assert!(render(&second.tokens).contains("x = 1"));
         assert!(!render(&second.tokens).contains("x = 2"));
+    }
+
+    #[test]
+    fn a_utf8_file_can_include_latin1_source() {
+        let (rendered, errors) = pp_with_errors(&[
+            (
+                "entry.dme",
+                "var/utf8 = \"café 日本 🦀\"\n#include \"legacy.dm\"\n".as_bytes(),
+            ),
+            (
+                "legacy.dm",
+                b"// vector: 90\xb0\r\nvar/legacy = \"caf\xe9 \xb0 \x92\"\r\n".as_slice(),
+            ),
+        ]);
+
+        assert!(errors.is_empty(), "{errors:?}");
+        assert_eq!(
+            rendered,
+            "var / utf8 = \"café 日本 🦀\"\nvar / legacy = \"café ° \u{0092}\""
+        );
+    }
+
+    #[test]
+    fn an_entry_file_can_be_latin1() {
+        let (rendered, errors) = pp_with_errors(&[("entry.dm", b"var/name = \"caf\xe9\"\n".as_slice())]);
+
+        assert!(errors.is_empty(), "{errors:?}");
+        assert_eq!(rendered, "var / name = \"café\"");
+    }
+
+    #[test]
+    fn decoded_latin1_source_is_cached_between_configuration_passes() {
+        static NEXT: AtomicUsize = AtomicUsize::new(0);
+
+        let id = NEXT.fetch_add(1, Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!("rmd-latin1-source-cache-{}-{id}", std::process::id()));
+        fs::create_dir_all(&dir).expect("temp dir");
+        let entry = dir.join("entry.dme");
+        let legacy = dir.join("legacy.dm");
+        fs::write(&entry, "#include \"legacy.dm\"\n").expect("write entry");
+        fs::write(&legacy, b"var/name = \"caf\xe9\"\n").expect("write Latin-1 source");
+
+        let arena = StrArena::new();
+        let first = Preprocessor::new(&arena)
+            .without_core()
+            .without_prelude()
+            .run(&entry)
+            .expect("first pass");
+        assert!(first.errors.is_empty(), "{:?}", first.errors);
+        assert_eq!(first.source_cache.len(), 2);
+        let file = first.sources.find(&legacy).expect("included source");
+        let contents = first.sources.contents(file).expect("decoded source");
+        assert_eq!(contents, "var/name = \"café\"\n");
+
+        fs::remove_file(&legacy).expect("remove Latin-1 source");
+        let second = Preprocessor::new(&arena)
+            .without_core()
+            .without_prelude()
+            .with_source_cache(first.source_cache.clone())
+            .run(&entry)
+            .expect("second pass");
+        fs::remove_dir_all(&dir).expect("remove temp dir");
+
+        assert!(second.errors.is_empty(), "{:?}", second.errors);
+        assert_eq!(render(&second.tokens), "var / name = \"café\"");
+        let file = second.sources.find(&legacy).expect("cached source");
+        let cached = second.sources.contents(file).expect("cached contents");
+        assert!(std::ptr::eq(contents, cached));
+    }
+
+    #[test]
+    fn a_missing_include_still_reports_a_missing_file() {
+        let (rendered, errors) = pp_with_errors(&[("entry.dm", "#include \"missing.dm\"\nvar/x = 1\n")]);
+
+        assert_eq!(rendered, "var / x = 1");
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(errors[0].contains("could not find included file"), "{errors:?}");
+        assert!(errors[0].contains("missing.dm"), "{errors:?}");
     }
 
     #[test]
