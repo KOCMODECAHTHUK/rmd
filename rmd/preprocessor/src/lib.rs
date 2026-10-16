@@ -1029,7 +1029,7 @@ impl<'a> Preprocessor<'a> {
             }
 
             if let Some(word) = token.word() {
-                if word == "defined" || word == "fexists" {
+                if word == "defined" {
                     expand = false;
                 } else if expand && self.try_macro(word, raw) {
                     continue;
@@ -1782,7 +1782,9 @@ mod tests {
         fs::create_dir_all(&dir).expect("temp dir");
 
         for (name, source) in files {
-            fs::write(dir.join(name), source).expect("write source");
+            let path = dir.join(name);
+            fs::create_dir_all(path.parent().expect("source directory")).expect("source directory");
+            fs::write(path, source).expect("write source");
         }
 
         let arena = StrArena::new();
@@ -1912,6 +1914,53 @@ mod tests {
         let rendered = pp(&[("conditional_close.dm", fixture!("programs/conditional-close.dm"))]);
 
         assert_eq!(rendered, "var / items = list ( first , )\nvar / after = 1");
+    }
+
+    #[test]
+    fn fexists_checks_literal_paths_and_guards_optional_includes() {
+        let (rendered, errors) = pp_with_errors(&[
+            ("entry.dm", fixture!("programs/fexists-literals.dm")),
+            ("+secret/foo.dm", "optional_file\n"),
+        ]);
+
+        assert!(errors.is_empty(), "{errors:?}");
+        assert_eq!(rendered, "optional_file\nmissing_file\nbackslash_path\nnot_a_file");
+    }
+
+    #[test]
+    fn fexists_expands_macro_arguments_in_if_and_elif() {
+        let (rendered, errors) = pp_with_errors(&[
+            ("entry.dm", fixture!("programs/fexists-macros.dm")),
+            ("+secret/foo.dm", ""),
+        ]);
+
+        assert!(errors.is_empty(), "{errors:?}");
+        assert_eq!(
+            rendered,
+            "object_macro\nchained_macro\nfunction_macro\nwrapped_fexists\nnegated_combination\nelif_macro"
+        );
+    }
+
+    #[test]
+    fn fexists_resolves_macro_paths_relative_to_each_including_file() {
+        let (rendered, errors) = pp_with_errors(&[
+            ("entry.dm", fixture!("programs/fexists-outer.dm")),
+            ("nested/inner.dm", fixture!("programs/fexists-inner.dm")),
+            ("nested/local.dm", "nested_file\n"),
+            ("root-only.dm", ""),
+        ]);
+
+        assert!(errors.is_empty(), "{errors:?}");
+        assert_eq!(rendered, "nested_file\nrestored_directory");
+    }
+
+    #[test]
+    fn fexists_still_diagnoses_macros_that_do_not_expand_to_a_path() {
+        let (rendered, errors) = pp_with_errors(&[("entry.dm", fixture!("programs/fexists-invalid-macro.dm"))]);
+
+        assert_eq!(rendered, "invalid_path_rejected");
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(errors[0].contains("fexists() expects a file path"), "{errors:?}");
     }
 
     #[test]
