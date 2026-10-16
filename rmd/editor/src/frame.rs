@@ -104,6 +104,7 @@ pub struct FrameInstances {
     /// only primaries that are not among their owner's sprites, the rest are found through `owner_keys`
     primary_sprites: HashMap<PrefabInstanceId, SpriteInstance>,
     placements: HashMap<PrefabInstanceId, CachedPlacement>,
+    unknown_placements: HashMap<PrefabInstanceId, Coord>,
     area_owners_by_coord: HashMap<Coord, Vec<PrefabInstanceId>>,
 }
 
@@ -122,6 +123,7 @@ impl FrameInstances {
         drop(std::mem::take(&mut self.primary_sprites));
         freed("primary sprites");
         drop(std::mem::take(&mut self.placements));
+        drop(std::mem::take(&mut self.unknown_placements));
         freed("placements");
         drop(std::mem::take(&mut self.area_components));
         drop(std::mem::take(&mut self.area_component_tiles));
@@ -144,6 +146,12 @@ impl FrameInstances {
 
     pub fn area_component_tiles(&self, component: PrefabInstanceId) -> HashSet<Coord> {
         self.area_component_tiles.get(&component).cloned().unwrap_or_default()
+    }
+
+    pub fn unknown_type_coords(&self) -> impl Iterator<Item = Coord> + '_ { self.unknown_placements.values().copied() }
+
+    pub fn unknown_type_instances(&self) -> impl Iterator<Item = PrefabInstanceId> + '_ {
+        self.unknown_placements.keys().copied()
     }
 
     pub fn update_lighting(&mut self, lighting: Option<&vm::bake::LightingMap>, range: Option<std::ops::Range<usize>>) {
@@ -378,6 +386,7 @@ pub fn build_with_options(
     let mut primary_sprites = HashMap::new();
     let mut owner_keys = HashMap::new();
     let mut placements = HashMap::new();
+    let mut unknown_placements = HashMap::new();
     let mut area_owners_by_coord = HashMap::<Coord, Vec<PrefabInstanceId>>::new();
     let area = tree.roots().area;
     let map = &document.map;
@@ -406,6 +415,7 @@ pub fn build_with_options(
                         continue;
                     };
                     let Some(id) = tree.id_of(&prefab.path) else {
+                        unknown_placements.insert(owner, Coord::new(x, y, z));
                         continue;
                     };
 
@@ -421,9 +431,11 @@ pub fn build_with_options(
                             hidden: !options.visibility.is_visible(id),
                         },
                     );
+
                     if rendered.is_area {
                         area_owners_by_coord.entry(coord).or_default().push(owner);
                     }
+
                     let (keys, unkeyed_primary) = OwnerKeys::of(&rendered);
                     if let Some(keys) = keys {
                         owner_keys.insert(owner, keys);
@@ -450,6 +462,7 @@ pub fn build_with_options(
         area_component_tiles,
         primary_sprites,
         placements,
+        unknown_placements,
         area_owners_by_coord,
         owner_keys,
         ..Default::default()
@@ -497,6 +510,20 @@ pub fn update_prefabs_with_options(
         .into_iter()
         .collect::<Vec<_>>();
     owners.sort_unstable_by_key(|owner| owner.get());
+
+    for owner in &owners {
+        match document
+            .prefab_instance(*owner)
+            .filter(|instance| tree.id_of(&instance.prefab().path).is_none())
+        {
+            Some(instance) => {
+                instances.unknown_placements.insert(*owner, instance.location.coord);
+            },
+            None => {
+                instances.unknown_placements.remove(owner);
+            },
+        }
+    }
 
     let changes = owners
         .iter()
@@ -1642,6 +1669,7 @@ mod tests {
         assert_eq!(actual.area_component_tiles, expected.area_component_tiles);
         assert_eq!(actual.sprite_sort_keys.len(), actual.sprites.len());
         assert_eq!(actual.primary_sprites, expected.primary_sprites);
+        assert_eq!(actual.unknown_placements, expected.unknown_placements);
         for owner in actual.placements.keys().chain(expected.placements.keys()) {
             assert_eq!(actual.sprite(*owner), expected.sprite(*owner));
         }

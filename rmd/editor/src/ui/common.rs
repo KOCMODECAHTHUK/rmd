@@ -1,4 +1,71 @@
+use std::{collections::HashSet, hash::Hash};
+
 use dear_imgui_rs::{Condition, ModalPopupToken, StyleColor, TableFlags, Ui, WindowFlags, WindowHoveredFlags, sys};
+
+pub(super) struct RowSelection<K> {
+    keys: HashSet<K>,
+    anchor: Option<K>,
+}
+
+impl<K> Default for RowSelection<K> {
+    fn default() -> Self {
+        Self {
+            keys: HashSet::new(),
+            anchor: None,
+        }
+    }
+}
+
+impl<K: Copy + Eq + Hash> RowSelection<K> {
+    pub(super) fn contains(&self, coord: &K) -> bool { self.keys.contains(coord) }
+
+    pub(super) fn clear(&mut self) {
+        self.keys.clear();
+        self.anchor = None;
+    }
+
+    pub(super) fn select(&mut self, key: K) {
+        self.keys.clear();
+        self.keys.insert(key);
+        self.anchor = Some(key);
+    }
+
+    pub(super) fn among(&self, order: impl IntoIterator<Item = K>) -> Vec<K> {
+        order
+            .into_iter()
+            .filter(|coord| self.keys.contains(coord))
+            .collect::<Vec<_>>()
+    }
+
+    pub(super) fn click(&mut self, ui: &Ui, order: &[K], position: usize) -> bool {
+        let coord = order[position];
+        let io = ui.io();
+        let anchor = self
+            .anchor
+            .and_then(|anchor| order.iter().position(|candidate| *candidate == anchor));
+
+        if io.key_shift()
+            && let Some(anchor) = anchor
+        {
+            if !io.key_ctrl() {
+                self.keys.clear();
+            }
+            self.keys.extend(&order[anchor.min(position)..=anchor.max(position)]);
+            false
+        } else if io.key_ctrl() {
+            if !self.keys.remove(&coord) {
+                self.keys.insert(coord);
+            }
+            self.anchor = Some(coord);
+            false
+        } else {
+            self.keys.clear();
+            self.keys.insert(coord);
+            self.anchor = Some(coord);
+            true
+        }
+    }
+}
 
 const MIN_STRETCH_WIDTH: f32 = 40.0;
 
@@ -123,7 +190,7 @@ pub(super) fn fit_icon(width: u32, height: u32, extent: f32) -> [f32; 2] {
 mod tests {
     use dear_imgui_rs::{Condition, Ui, WindowFlags, sys};
 
-    use super::{begin_centered_modal, focus_window_on_hover};
+    use super::{RowSelection, begin_centered_modal, focus_window_on_hover};
     use crate::ui::{
         IMGUI_CONTEXT,
         fixtures::{
@@ -135,6 +202,25 @@ mod tests {
             set_desktop_geometry,
         },
     };
+
+    #[test]
+    fn table_selection_supports_control_toggle_and_shift_range() {
+        let _guard = IMGUI_CONTEXT.lock().unwrap();
+        let mut context = rectangle_context();
+        let mut selection = RowSelection::default();
+        let order = [10, 20, 30, 40];
+        assert!(selection.click(context.frame(), &order, 0));
+        assert!(context.render_legacy().valid());
+        context.io_mut().add_key_event(dear_imgui_rs::Key::ModCtrl, true);
+        assert!(!selection.click(context.frame(), &order, 2));
+        assert!(context.render_legacy().valid());
+        assert_eq!(selection.among(order), [10, 30]);
+        context.io_mut().add_key_event(dear_imgui_rs::Key::ModCtrl, false);
+        context.io_mut().add_key_event(dear_imgui_rs::Key::ModShift, true);
+        assert!(!selection.click(context.frame(), &order, 3));
+        assert!(context.render_legacy().valid());
+        assert_eq!(selection.among(order), [30, 40]);
+    }
 
     #[test]
     fn movable_modals_keep_their_position_until_reopened() {

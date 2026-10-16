@@ -65,15 +65,21 @@ impl DiagnosticsState {
     }
 
     pub(super) fn set_map(&mut self, path: PathBuf, report: LoadReport) {
-        if report.errors > 0 {
-            self.open = Some(DiagnosticSeverity::Error);
-        }
+        let errors = report.errors;
+        let warnings = report.warnings;
         if report.is_empty() {
             self.maps.remove(&path);
         } else {
             self.maps.insert(path, report);
         }
+
         self.close_empty_view();
+
+        if errors > 0 {
+            self.open = Some(DiagnosticSeverity::Error);
+        } else if warnings > 0 && self.open != Some(DiagnosticSeverity::Error) {
+            self.open = Some(DiagnosticSeverity::Warning);
+        }
     }
 
     pub(super) fn set_failed_codebase(&mut self, report: LoadReport) {
@@ -437,6 +443,56 @@ mod tests {
         state.set_map(PathBuf::from("b.dmm"), LoadReport::default());
         assert_eq!(state.count(DiagnosticSeverity::Error), 1);
         assert_eq!(state.open, None);
+    }
+
+    #[test]
+    fn map_warnings_open_automatically_and_remain_available_after_dismissal() {
+        let mut state = DiagnosticsState::default();
+        let path = PathBuf::from("map.dmm");
+        let report = LoadReport {
+            warnings: 1,
+            warning_lines: vec![String::from("map.dmm: unknown type path /obj/missing")],
+            ..LoadReport::default()
+        };
+        state.set_map(path.clone(), report.clone());
+        assert_eq!(state.open, Some(DiagnosticSeverity::Warning));
+
+        state.open = None;
+        assert_eq!(state.count(DiagnosticSeverity::Warning), 1);
+        assert_eq!(state.text(DiagnosticSeverity::Warning).0, report.warning_lines[0]);
+        state.set_map(path.clone(), report);
+        assert_eq!(state.count(DiagnosticSeverity::Warning), 1);
+        assert_eq!(state.open, Some(DiagnosticSeverity::Warning));
+
+        state.set_map(path, LoadReport::default());
+        assert_eq!(state.count(DiagnosticSeverity::Warning), 0);
+        assert_eq!(state.open, None);
+    }
+
+    #[test]
+    fn map_errors_take_priority_over_warnings_and_can_be_replaced_by_warnings() {
+        let mut state = DiagnosticsState::default();
+        let warning = LoadReport {
+            warnings: 1,
+            warning_lines: vec![String::from("unknown type path")],
+            ..LoadReport::default()
+        };
+        state.set_map(
+            PathBuf::from("errors.dmm"),
+            LoadReport {
+                errors: 1,
+                error_lines: vec![String::from("map error")],
+                ..warning.clone()
+            },
+        );
+        assert_eq!(state.open, Some(DiagnosticSeverity::Error));
+        state.set_map(PathBuf::from("warnings.dmm"), warning.clone());
+        assert_eq!(state.open, Some(DiagnosticSeverity::Error));
+        assert_eq!(state.count(DiagnosticSeverity::Warning), 2);
+
+        state.set_map(PathBuf::from("errors.dmm"), warning);
+        assert_eq!(state.count(DiagnosticSeverity::Error), 0);
+        assert_eq!(state.open, Some(DiagnosticSeverity::Warning));
     }
 
     #[test]

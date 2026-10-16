@@ -1,4 +1,5 @@
 use std::{
+    cell::RefCell,
     collections::{HashMap, HashSet},
     path::PathBuf,
     sync::Arc,
@@ -34,6 +35,7 @@ mod git;
 mod guides;
 mod highlight;
 mod instance;
+mod issues;
 mod level;
 mod node;
 mod palette;
@@ -63,6 +65,7 @@ pub(crate) use self::{
     git::GitDocState,
     guides::GuideBadge,
     instance::{EditScope, SelectedTransform},
+    issues::MapIssueGroup,
     level::validate_level,
     node::NodeOverlay,
     palette::{PrefabThumbnail, prefab_thumbnail_for, prefab_thumbnail_or_missing},
@@ -81,6 +84,8 @@ struct DocumentCache {
     // edited while the bake was off growing by a level, replayed when it comes back
     unbaked: Vec<PrefabInstanceId>,
     always_highlights: Vec<PrefabInstanceId>,
+    unknown_highlights: RefCell<highlight::UnknownHighlights>,
+    issues: RefCell<issues::IssueGroups>,
     /// What a replayed panel frame asked this document to re-derive, held until it is active.
     pending_rebake: editor::bake::UiRebake,
     git: Option<GitDocState>,
@@ -108,6 +113,7 @@ pub struct Session {
     sanitize_vars_on_save: bool,
     /// A map whose merge conflicts were just loaded, for the UI to surface
     loaded_conflicts: Option<DocumentId>,
+    loaded_issues: Option<DocumentId>,
     queued_bakes: Vec<DocumentId>,
     standalone_baker: editor::bake::Standalone,
     standalone: Vec<(Prefab, Option<visual::Appearance>)>,
@@ -154,6 +160,7 @@ impl Session {
             git_enabled: true,
             sanitize_vars_on_save: false,
             loaded_conflicts: None,
+            loaded_issues: None,
             queued_bakes: Vec::new(),
             standalone_baker: editor::bake::Standalone::default(),
             standalone: Vec::new(),

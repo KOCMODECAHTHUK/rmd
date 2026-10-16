@@ -37,6 +37,7 @@ impl Session {
 
         if let Some(id) = self.state.document_for_path(&path) {
             self.set_active_document(id);
+            self.note_loaded_issues(id);
 
             return;
         }
@@ -55,6 +56,7 @@ impl Session {
             repo.map(|repo| GitDocState::new(repo, conflict.map(ConflictState::new)));
 
         self.refresh_git_document(id);
+        self.note_loaded_issues(id);
     }
 
     pub fn reload_map(&mut self, id: DocumentId, loaded: LoadedMap) -> bool {
@@ -92,6 +94,7 @@ impl Session {
         self.set_active_document(id);
         self.rebake(id);
         self.refresh_git_document(id);
+        self.note_loaded_issues(id);
 
         true
     }
