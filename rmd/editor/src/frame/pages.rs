@@ -28,6 +28,7 @@ fn spare_sprite(z: u32) -> SpriteInstance {
         is_area: false,
         hidden: false,
         click_through: false,
+        node_pickable: false,
         area_edges: 0,
         lighting: render::SpriteLighting::Normal,
         color: [0.0; 4],
@@ -524,6 +525,7 @@ pub(super) mod tests {
             &textures,
             &document,
             FrameRenderOptions {
+                node_types: None,
                 visibility: &visibility,
                 tile_size: 32,
                 appearances: &std::collections::HashMap::new(),

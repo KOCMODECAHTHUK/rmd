@@ -74,6 +74,7 @@ pub(crate) use self::{
 
 #[derive(Default)]
 struct DocumentCache {
+    node_types: HashSet<TypeId>,
     instances: FrameInstances,
     revision: u64,
     frame_updates: Vec<FrameUpdate>,

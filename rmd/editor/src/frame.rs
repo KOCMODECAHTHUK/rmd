@@ -82,6 +82,7 @@ struct SpriteGroup {
 }
 
 struct RenderContext<'a> {
+    node_types: Option<&'a HashSet<TypeId>>,
     appearances: &'a HashMap<u64, SharedAppearance>,
     tree: &'a ObjectTree,
     icons: &'a HashMap<String, Metadata>,
@@ -275,6 +276,7 @@ impl FromIterator<TreePath> for HiddenTypes {
 
 #[derive(Debug, Clone, Copy)]
 pub struct FrameRenderOptions<'a> {
+    pub node_types: Option<&'a HashSet<TypeId>>,
     pub visibility: &'a TypeVisibility,
     pub tile_size: u32,
     /// What the bake made of each atom, keyed by `vm::bake` atom id, empty when baking is off
@@ -347,6 +349,7 @@ pub fn instance_for(
         is_area,
         hidden: false,
         click_through: false,
+        node_pickable: false,
         area_edges: 0,
         lighting: match appearance.lighting {
             vm::AppearanceLighting::Normal => render::SpriteLighting::Normal,
@@ -371,6 +374,7 @@ pub fn build(
         textures,
         document,
         FrameRenderOptions {
+            node_types: None,
             visibility: &TypeVisibility::default(),
             tile_size,
             appearances: &HashMap::new(),
@@ -394,6 +398,7 @@ pub fn build_with_options(
     let area_components = build_area_components(tree, document);
     let area_component_tiles = index_area_component_tiles(&area_components);
     let render = RenderContext {
+        node_types: options.node_types,
         appearances: options.appearances,
         tree,
         icons,
@@ -492,6 +497,7 @@ pub fn update_prefabs(
         document,
         owners,
         FrameRenderOptions {
+            node_types: None,
             visibility: &TypeVisibility::default(),
             tile_size,
             appearances: &HashMap::new(),
@@ -610,6 +616,7 @@ pub fn update_prefabs_with_options(
 
     let render = RenderContext {
         appearances: options.appearances,
+        node_types: options.node_types,
         tree,
         icons,
         textures,
@@ -867,6 +874,11 @@ impl RenderContext<'_> {
         }
 
         let mut primary = primary.or_else(|| sprites.first().map(|(_, sprite)| *sprite));
+        let node_pickable = self.node_types.is_some_and(|types| types.contains(&id));
+        for sprite in sprites.iter_mut().map(|(_, sprite)| sprite).chain(&mut primary) {
+            sprite.node_pickable = node_pickable;
+        }
+
         // `mouse_opacity = 0` on objects too would lock out mapped dirt and decals
         if is_turf && appearance.mouse_opacity == 0 {
             for sprite in sprites.iter_mut().map(|(_, sprite)| sprite).chain(&mut primary) {
@@ -1186,7 +1198,11 @@ mod tests {
         path::TreePath,
         types::{Identifier, Value, VarModifiers},
     };
-    use std::{collections::HashMap, path::PathBuf, sync::Arc};
+    use std::{
+        collections::{HashMap, HashSet},
+        path::PathBuf,
+        sync::Arc,
+    };
 
     use dmi::{
         IconFile,
@@ -1499,6 +1515,7 @@ mod tests {
             &textures,
             &document,
             FrameRenderOptions {
+                node_types: None,
                 visibility: &visibility,
                 tile_size: 32,
                 appearances: &HashMap::new(),
@@ -1527,6 +1544,7 @@ mod tests {
             &textures,
             &document,
             FrameRenderOptions {
+                node_types: None,
                 visibility: &visibility,
                 tile_size: 32,
                 appearances: &HashMap::new(),
@@ -1766,6 +1784,7 @@ mod tests {
     #[test]
     fn equal_layer_overlays_and_underlays_keep_their_owners_turf_priority() {
         let tree = tree(&[("/obj/decal", "decal", 2.0), ("/turf/floor", "floor", 2.0)]);
+        let node_types = HashSet::from([tree.id_of(&TreePath::parse("/obj/decal")).unwrap()]);
         let document = document(one_tile_map(&["/obj/decal", "/turf/floor"]));
         let owners = document.instance_ids_at(Coord::new(1, 1, 1));
         let child = |state: &str| AppearanceDelta {
@@ -1793,6 +1812,7 @@ mod tests {
             &textures(&["floor", "decal", "underlay", "overlay"]),
             &document,
             FrameRenderOptions {
+                node_types: Some(&node_types),
                 visibility: &TypeVisibility::default(),
                 tile_size: 32,
                 appearances: &appearances,
@@ -1803,6 +1823,13 @@ mod tests {
             drawn(&instances).iter().map(|sprite| sprite.owner).collect::<Vec<_>>(),
             [owners[1], owners[1], owners[1], owners[0], owners[0], owners[0]]
         );
+        assert!(
+            instances
+                .live_sprites()
+                .all(|sprite| sprite.node_pickable == (sprite.owner == owners[0]))
+        );
+        assert!(instances.sprite(owners[0]).unwrap().node_pickable);
+        assert!(!instances.sprite(owners[1]).unwrap().node_pickable);
     }
 
     #[test]
@@ -1910,6 +1937,7 @@ mod tests {
             &textures(&["floor", "decal", "overlay"]),
             &document,
             FrameRenderOptions {
+                node_types: None,
                 visibility: &TypeVisibility::default(),
                 tile_size: 32,
                 appearances: &appearances,
@@ -1955,6 +1983,7 @@ mod tests {
             &textures(&["floor", "table", "light"]),
             &document,
             FrameRenderOptions {
+                node_types: None,
                 visibility: &visibility,
                 tile_size: 32,
                 appearances: &appearances,
@@ -2006,6 +2035,7 @@ mod tests {
             &textures(&["floor", "table", "light"]),
             &document,
             FrameRenderOptions {
+                node_types: None,
                 visibility: &visibility,
                 tile_size: 32,
                 appearances: &appearances,
@@ -2053,6 +2083,7 @@ mod tests {
             &textures(&["floor", "table", "light"]),
             &document,
             FrameRenderOptions {
+                node_types: None,
                 visibility: &visibility,
                 tile_size: 32,
                 appearances: &appearances,
@@ -2122,6 +2153,7 @@ mod tests {
             &textures,
             &document,
             FrameRenderOptions {
+                node_types: None,
                 visibility: &visibility,
                 tile_size: 32,
                 appearances: &HashMap::new(),
@@ -2173,6 +2205,7 @@ mod tests {
             &textures,
             &document,
             FrameRenderOptions {
+                node_types: None,
                 visibility: &TypeVisibility::default(),
                 tile_size: 32,
                 appearances: &appearances,

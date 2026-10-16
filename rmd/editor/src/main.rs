@@ -611,6 +611,9 @@ impl App {
                         session.replace_instance(owner);
                     }
                 },
+                PickRequest::NodeSelect => {
+                    session.select_node_from_pick(pick);
+                },
                 PickRequest::NodeSeed(coord) => {
                     let picked = match pick {
                         PickResult::Hit(owner) => Some(owner),

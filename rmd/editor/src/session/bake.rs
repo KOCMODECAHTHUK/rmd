@@ -373,6 +373,7 @@ impl Session {
                 document,
                 &affected,
                 FrameRenderOptions {
+                    node_types: Some(&cache.node_types),
                     visibility: type_visibility,
                     tile_size: options.tile_size,
                     appearances: editor::bake::appearances(cache.bake.as_ref()),

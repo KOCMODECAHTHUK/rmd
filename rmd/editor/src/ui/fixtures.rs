@@ -148,6 +148,7 @@ pub(super) struct RectangleUiHarness {
     pub(super) session: Session,
     pub(super) settings: Settings,
     pub(super) view: MapViewState,
+    pub(super) interaction: MapViewInteraction,
     pub(super) id: DocumentId,
     pub(super) conflict_button: Option<[f32; 2]>,
     pub(super) focus_other_window: bool,
@@ -194,6 +195,7 @@ impl RectangleUiHarness {
             session,
             settings: Settings::default(),
             view,
+            interaction: MapViewInteraction::default(),
             id,
             conflict_button: None,
             focus_other_window: false,
@@ -231,6 +233,10 @@ impl RectangleUiHarness {
         let name = format!("###viewport-{}", self.id.get());
         ui.set_window_pos_by_name(&name, [0.0; 2]);
         ui.set_window_size_by_name(&name, [800.0, 600.0]);
+        self.interaction = MapViewInteraction {
+            selected: self.session.selected_instance(),
+            ..Default::default()
+        };
         self.state.draw_map_view(
             ui,
             &mut self.session,
@@ -239,7 +245,7 @@ impl RectangleUiHarness {
                 id: self.id,
                 index: 0,
                 view: &mut self.view,
-                interaction: &mut MapViewInteraction::default(),
+                interaction: &mut self.interaction,
                 guide_badges: &[],
 
                 refit_requested: false,

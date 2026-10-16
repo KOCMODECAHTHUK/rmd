@@ -593,7 +593,13 @@ impl UiState {
         }
 
         if session.tool() == Tool::Node {
-            drive_node_tool(session, frame, node_hit, clicks, is_blame_capturing);
+            drive_node_tool(
+                session,
+                frame,
+                node_hit,
+                clicks,
+                capture.is_any() || ui.io().want_text_input(),
+            );
         }
 
         self.end_strokes(session, clicks, is_gizmo_capturing);
