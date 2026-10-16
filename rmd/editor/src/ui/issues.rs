@@ -408,6 +408,7 @@ fn matches_filter(query: &str, title: &str, path: &TreePath) -> bool {
     title.to_ascii_lowercase().contains(query) || path.to_string().to_ascii_lowercase().contains(query)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn draw_occurrences(
     ui: &Ui, session: &Session, document: DocumentId, group: &MapIssueGroup, replacement: &mut Replacement,
     selection: &mut RowSelection<PrefabInstanceId>, level_only: bool, action: &mut Option<Action>,
@@ -466,8 +467,8 @@ fn draw_occurrences(
         .target
         .as_ref()
         .map_or_else(|| String::from("Choose replacement..."), ToString::to_string);
-    if let Some(_combo) = ui.begin_combo("##issue-replacement", preview) {
-        if let Some(target) = draw_type_path_search(
+    if let Some(_combo) = ui.begin_combo("##issue-replacement", preview)
+        && let Some(target) = draw_type_path_search(
             ui,
             Some(tree),
             &mut replacement.query,
@@ -475,10 +476,10 @@ fn draw_occurrences(
             50,
             |tree, path| issues::can_replace(tree, &group.path, path),
             |_| true,
-        ) {
-            replacement.target = Some(target);
-            ui.close_current_popup();
-        }
+        )
+    {
+        replacement.target = Some(target);
+        ui.close_current_popup();
     }
     drop(disabled);
     if !classifiable {
