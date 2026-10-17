@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use crate::theme::DEFAULT_THEME;
 
 const MAX_RECENT: usize = 10;
-const DEFAULT_PREFERRED_EDITOR: &str = "code --goto {file}:{line}:{column}";
+const DEFAULT_PREFERRED_EDITOR: &str = "code {root} --goto {file}:{line}:{column}";
 pub(crate) const DEFAULT_COOP_PORT: u16 = 3131;
 pub const UI_SCALE_PERCENT: std::ops::RangeInclusive<u32> = 50..=200;
 pub const FONT_SIZE: std::ops::RangeInclusive<u32> = 8..=40;
