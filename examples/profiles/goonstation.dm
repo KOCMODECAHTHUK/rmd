@@ -715,6 +715,10 @@
 	if(icon_state == state_on || icon_state == state_off)
 		icon_state = demir_lit ? state_on : state_off
 
+/obj/machinery/light/incandescent/demir_bake_icon()
+	autoposition(instant = TRUE)
+	..()
+
 // Map lights are direct RobustLight2 sources. Their native constructor scales
 // the mapped brightness before enabling the point light.
 /obj/map/light/demir_apply_light()

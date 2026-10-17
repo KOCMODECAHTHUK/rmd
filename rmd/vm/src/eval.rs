@@ -285,6 +285,7 @@ struct IteratorState {
 enum Flow {
     Continue,
     Return,
+    EndSpawn,
 }
 
 pub(crate) struct Evaluator<'a> {
@@ -954,19 +955,35 @@ impl<'a> Evaluator<'a> {
                     frame.ip = body;
                     match self.execute_until(frame, Some(merge)) {
                         Ok(Flow::Continue) => {},
-                        Ok(Flow::Return) => return Ok(Flow::Return),
+                        Ok(flow) => return Ok(flow),
                         Err(fault) if fault.kind == FaultKind::Thrown => {
                             frame.stack.truncate(stack_len);
                             frame.ip = catch;
                             match self.execute_until(frame, Some(merge))? {
                                 Flow::Continue => {},
-                                Flow::Return => return Ok(Flow::Return),
+                                flow => return Ok(flow),
                             }
                         },
                         Err(fault) => return Err(fault),
                     }
                     frame.ip = resume;
                 },
+                Op::Spawn => {
+                    let body = self.jump_target(frame)?;
+                    let stack_len = frame.stack.len();
+                    let resume = frame.ip;
+                    frame.ip = body;
+                    match self.execute_until(frame, None) {
+                        Ok(Flow::Return) => return Ok(Flow::Return),
+                        Ok(_) => {},
+                        Err(fault) if fault.kind == FaultKind::Thrown => self.thrown = None,
+                        Err(fault) if fault.kind == FaultKind::Sleep => {},
+                        Err(fault) => return Err(fault),
+                    }
+                    frame.stack.truncate(stack_len);
+                    frame.ip = resume;
+                },
+                Op::EndSpawn => return Ok(Flow::EndSpawn),
                 Op::CatchValue => frame.stack.push(self.thrown.take().unwrap_or_default()),
                 Op::Drop => {
                     self.pop(frame)?;
