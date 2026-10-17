@@ -1168,12 +1168,13 @@ impl<'a> Preprocessor<'a> {
             }
 
             for (index, argument) in arguments.iter().enumerate() {
-                let valid = if index % 2 == 0 {
+                let is_valid = if index % 2 == 0 {
                     argument.token.word().is_some() || matches!(argument.token, Token::IntegerLiteral(_))
                 } else {
                     argument.token == Token::Comma
                 };
-                if !valid {
+
+                if !is_valid {
                     self.diagnose(
                         Code::BadDirective,
                         argument.location,

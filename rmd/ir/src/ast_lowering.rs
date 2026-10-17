@@ -1,7 +1,7 @@
 use core::{
     location::{Location, SourceLine},
-    path::TreePath,
-    types::{Identifier, InputType, ListEntry, Value, VarModifiers, VarSpec},
+    path::{PathFlags, TreePath},
+    types::{Identifier, InputType, ListEntry, ProcKind, Value, VarModifiers, VarSpec},
 };
 
 use ast::{AST, AccessKind, ContextMacro, Expression, ExpressionId, ForLoop, Literal, Statement, constant::fold};
@@ -205,16 +205,24 @@ impl<'a> IrModuleBuilder<'a> {
         &mut self, owner: TreePath, name: Identifier, params: &[ast::ProcParam], variadic: bool, body: &[Statement],
         location: Location,
     ) -> ProcId {
-        self.lower_proc_with_intrinsic(owner, name, params, variadic, body, None, location)
+        self.lower_proc_with_intrinsic(owner, name, ProcKind::Proc, params, variadic, body, None, location)
     }
 
     #[allow(clippy::too_many_arguments)]
     pub fn lower_proc_with_intrinsic(
-        &mut self, owner: TreePath, name: Identifier, params: &[ast::ProcParam], variadic: bool, body: &[Statement],
-        intrinsic: Option<Intrinsic>, location: Location,
+        &mut self, owner: TreePath, name: Identifier, kind: ProcKind, params: &[ast::ProcParam], variadic: bool,
+        body: &[Statement], intrinsic: Option<Intrinsic>, location: Location,
     ) -> ProcId {
         let locals_in_memory = statements_contain_try(self.ast, body);
-        let proc = owner.concat(&TreePath::parse(&format!("proc/{name}")));
+        let proc = match kind {
+            ProcKind::Verb => owner.concat(&TreePath::parse(&format!("verb/{name}"))),
+            ProcKind::Override => {
+                let mut proc = owner.concat(&TreePath::new(vec![name.clone()], false));
+                proc.flags |= PathFlags::IS_PROC;
+                proc
+            },
+            ProcKind::Proc | ProcKind::Operator => owner.concat(&TreePath::parse(&format!("proc/{name}"))),
+        };
 
         self.lower_function(
             owner,

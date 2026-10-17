@@ -3412,6 +3412,17 @@ fn proc_macro_is_the_proc_path() {
 }
 
 #[test]
+fn proc_macro_text_keeps_the_declared_keyword() {
+    assert_eq!(
+        run(
+            fixture!("programs/proc_macro_text_keeps_the_declared_keyword.dm"),
+            "test"
+        ),
+        "/mob/proc/plain,/mob/verb/spoken,/mob/child/plain,/mob/child/spoken,/mob/proc/plain,/mob/verb/spoken,1".into()
+    );
+}
+
+#[test]
 fn proc_macro_calls_back_into_a_proc_block_proc() {
     assert_eq!(
         run(

@@ -122,12 +122,13 @@ impl IssuesPanel {
         &mut self, ui: &Ui, session: &mut Session, settings: &Settings, open: &mut bool,
     ) -> IssuesOutput {
         let mut output = IssuesOutput::default();
-        let focus = std::mem::take(&mut self.focus_requested);
+        let is_focus_requested = std::mem::take(&mut self.focus_requested);
         let window = self.window.clone();
         self.visible = false;
         if !*open {
             return output;
         }
+
         self.replacements
             .retain(|(id, path), _| session.map_issues(*id).iter().any(|group| group.path == *path));
         let count = session
@@ -149,16 +150,21 @@ impl IssuesPanel {
             format!("Map Issues ({count})")
         };
         let mut action = None;
-        ui.window(window.label(title)).opened(open).focused(focus).build(|| {
-            self.visible = true;
-            if settings.focus_windows_on_hover {
-                focus_window_on_hover(ui);
-            }
-            self.draw_contents(ui, session, &mut action, &mut output);
-        });
+        ui.window(window.label(title))
+            .opened(open)
+            .focused(is_focus_requested)
+            .build(|| {
+                self.visible = true;
+                if settings.focus_windows_on_hover {
+                    focus_window_on_hover(ui);
+                }
+
+                self.draw_contents(ui, session, &mut action, &mut output);
+            });
         if let Some(action) = action {
             output.jump = self.apply(session, action);
         }
+
         output
     }
 
@@ -175,11 +181,13 @@ impl IssuesPanel {
         if !self.all_maps && self.selection_document != active {
             self.select_group(None);
         }
+
         self.selection_document = active;
         if session.tree().is_none() {
             centered_note(ui, "Load a codebase to check map paths");
             return;
         }
+
         if self.all_maps {
             ui.text_disabled("All open maps");
         } else if let Some(document) = active.and_then(|id| session.state.document(id)) {
@@ -192,6 +200,7 @@ impl IssuesPanel {
                 },
             ));
         }
+
         ui.set_next_item_width(-f32::MIN_POSITIVE);
         ui.input_text("##issues-filter", &mut self.filter)
             .hint("Filter unknown paths")
@@ -238,12 +247,13 @@ impl IssuesPanel {
         {
             self.select_group(groups.first().map(|(id, _, group)| (*id, group.path.clone())));
         }
+
         if groups.is_empty() {
             self.select_group(None);
-            let any_issues = maps.iter().any(|(_, _, groups)| !groups.is_empty());
+            let is_any_issue = maps.iter().any(|(_, _, groups)| !groups.is_empty());
             centered_note(
                 ui,
-                if any_issues {
+                if is_any_issue {
                     "No matching issues"
                 } else {
                     "No unknown type paths"
@@ -251,6 +261,7 @@ impl IssuesPanel {
             );
             return;
         }
+
         ui.text_disabled(format!("{} unknown paths", groups.len()));
         let height = (ui.content_region_avail()[1] * 0.3).max(ui.frame_height_with_spacing() * 3.0);
         let count_width = ui.calc_text_size("Instances")[0];
@@ -284,6 +295,7 @@ impl IssuesPanel {
         if self.all_maps {
             table = table.column("Map").weight(1.0).done();
         }
+
         let mut selected = None;
         table.build(|ui| {
             for index in ListClipper::new(groups.len()).begin(ui).iter() {
@@ -299,6 +311,7 @@ impl IssuesPanel {
                 {
                     selected = Some((id, group.path.clone()));
                 }
+
                 ui.set_item_tooltip(group.path.to_string());
                 ui.table_next_column();
                 ui.text(group.instances.len().to_string());
@@ -311,6 +324,7 @@ impl IssuesPanel {
         if let Some(selected) = selected {
             self.select_group(Some(selected));
         }
+
         let Some((id, _, group)) = groups
             .iter()
             .find(|(id, _, group)| self.selected_group.as_ref() == Some(&(*id, group.path.clone())))
@@ -365,6 +379,7 @@ impl IssuesPanel {
                 if instances.is_empty() {
                     return None;
                 }
+
                 let current = self
                     .current
                     .filter(|target| target.document == document)
@@ -438,9 +453,11 @@ fn draw_occurrences(
             targets.len()
         ));
     }
+
     if ui.button("Copy path") {
         output.copy = Some(group.path.to_string());
     }
+
     same_line_if_fits(ui, ui.frame_height() * 2.0 + ui.clone_style().item_spacing()[0]);
     if ui.arrow_button("##previous", Direction::Left) {
         *action = Some(Action::Step {
@@ -449,6 +466,7 @@ fn draw_occurrences(
             forward: false,
         });
     }
+
     ui.set_item_tooltip("Previous occurrence");
     ui.same_line();
     if ui.arrow_button("##next", Direction::Right) {
@@ -458,11 +476,12 @@ fn draw_occurrences(
             forward: true,
         });
     }
+
     ui.set_item_tooltip("Next occurrence");
     let tree = session.tree().unwrap();
-    let classifiable = issues::has_replacement_kind(tree, &group.path);
+    let is_classifiable = issues::has_replacement_kind(tree, &group.path);
     ui.set_next_item_width(-f32::MIN_POSITIVE);
-    let disabled = ui.begin_disabled_with_cond(!classifiable || editable.is_empty());
+    let disabled = ui.begin_disabled_with_cond(!is_classifiable || editable.is_empty());
     let preview = replacement
         .target
         .as_ref()
@@ -481,10 +500,12 @@ fn draw_occurrences(
         replacement.target = Some(target);
         ui.close_current_popup();
     }
+
     drop(disabled);
-    if !classifiable {
+    if !is_classifiable {
         ui.text_wrapped("Cannot determine whether this path is an object, turf, or area. Replacement is unavailable.");
     }
+
     let target = replacement
         .target
         .as_ref()
@@ -499,6 +520,7 @@ fn draw_occurrences(
             target: target.unwrap().clone(),
         });
     }
+
     ui.set_item_tooltip("Change the type path and keep each instance's overrides");
     same_line_if_fits(ui, button_width(ui, &delete));
     if ui.with_disabled_if(editable.is_empty(), || ui.button(&delete)) {
@@ -508,6 +530,7 @@ fn draw_occurrences(
             instances: editable.clone(),
         });
     }
+
     let tile_width = ui.calc_text_size("000, 000, 00")[0];
     let buttons_width = button_width(ui, "Replace") + button_width(ui, "Delete") + ui.clone_style().item_spacing()[0];
     let (scroll, inner_width) = overflow_scroll(ui, table_min_width(ui, &[tile_width, buttons_width], 0));
@@ -550,20 +573,24 @@ fn draw_occurrences(
                 {
                     *action = Some(Action::Jump(JumpTarget { document, instance }));
                 }
+
                 if let Some(_menu) = ui.begin_popup_context_item() {
                     if ui.menu_item("Jump to tile") {
                         *action = Some(Action::Jump(JumpTarget { document, instance }));
                     }
+
                     if ui.menu_item("Copy coordinates") {
                         output.copy = Some(format!("{}, {}, {}", coord.x, coord.y, coord.z));
                     }
+
                     if ui.menu_item("Copy path") {
                         output.copy = Some(group.path.to_string());
                     }
                 }
+
                 ui.table_next_column();
-                let can_edit = all_editable.binary_search(&instance).is_ok();
-                if ui.with_disabled_if(!can_edit || target.is_none(), || ui.small_button("Replace")) {
+                let is_editable = all_editable.binary_search(&instance).is_ok();
+                if ui.with_disabled_if(!is_editable || target.is_none(), || ui.small_button("Replace")) {
                     *action = Some(Action::Replace {
                         document,
                         path: group.path.clone(),
@@ -571,8 +598,9 @@ fn draw_occurrences(
                         target: target.unwrap().clone(),
                     });
                 }
+
                 ui.same_line();
-                if ui.with_disabled_if(!can_edit, || ui.small_button("Delete")) {
+                if ui.with_disabled_if(!is_editable, || ui.small_button("Delete")) {
                     *action = Some(Action::Delete {
                         document,
                         path: group.path.clone(),
@@ -703,6 +731,7 @@ mod tests {
             assert!(!panel.has_focus_request(), "a draw consumes the one-shot focus request");
             assert!(context.render_legacy().valid());
         }
+
         assert!(panel.visible());
         for group in session.map_issues(document).iter() {
             panel.apply(
@@ -714,6 +743,7 @@ mod tests {
                 },
             );
         }
+
         assert!(session.map_issues(document).is_empty());
         panel.draw(context.frame(), &mut session, &Settings::default(), &mut open);
         assert!(context.render_legacy().valid());
