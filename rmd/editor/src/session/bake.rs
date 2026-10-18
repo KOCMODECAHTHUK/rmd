@@ -440,42 +440,6 @@ mod tests {
     };
 
     #[test]
-    #[ignore]
-    fn scratch_tgmc_cables() {
-        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/TerraGov-Marine-Corps");
-        let options = editor::environment::BakeOptions {
-            forced_profile: Some(String::from("tgmc")),
-            ..Default::default()
-        };
-        let loaded =
-            crate::loader::load_codebase(&root.join("tgmc.dme"), &options, &Progress::new()).expect("TGMC codebase");
-        let mut session = Session::new();
-        session.apply_codebase(loaded);
-        let mut map = Map::new(Size { x: 4, y: 1, z: 1 });
-        for x in 1..=4 {
-            let mut tile = Vec::new();
-            if x == 2 || x == 3 {
-                tile.push(Prefab::new(TreePath::parse("/obj/structure/cable")));
-            }
-            let mut floor = Prefab::new(TreePath::parse("/turf/open/floor/plating"));
-            floor.set_var("intact_tile".into(), Value::Num(0.0));
-            tile.push(floor);
-            tile.push(Prefab::new(TreePath::parse("/area")));
-            let key = map.intern_tile(tile);
-            map.grid[0][0][(x - 1) as usize] = key;
-        }
-        session.activate_document(MapDocument::new(map, 1));
-        settle_bake(&mut session);
-        let bake = session.active_cache().bake.as_ref().unwrap();
-        eprintln!("faults: {:?}", bake.diagnostics.entries);
-        for x in [2, 3] {
-            let id = downstream_instance(&session, x, 1, "/obj/structure/cable");
-            eprintln!("delta {x}: {:?}", bake.appearances.get(&id.get()));
-            eprintln!("resolved {x}: {:?}", downstream_appearance(&session, x, 1, "/obj/structure/cable"));
-        }
-    }
-
-    #[test]
     #[ignore = "requires the local target/TerraGov-Marine-Corps checkout"]
     fn bundled_tgmc_profile_bakes_maps_and_tools() {
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/TerraGov-Marine-Corps");
