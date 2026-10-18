@@ -3,12 +3,12 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use dear_imgui_rs::{Condition, InputTextMultilineFlags, Key, StyleColor, Ui, WindowFlags, WindowKey};
+use dear_imgui_rs::{Condition, InputTextMultilineFlags, StyleColor, Ui, WindowFlags, WindowKey};
 use editor::progress::{Snapshot, Stage};
 
 use super::{
     SAVE_ERROR_COLOR,
-    common::{center_next_window, dpi},
+    common::{DialogButton, center_next_window, dialog_buttons, dpi},
 };
 use crate::{
     loader::LoadView,
@@ -166,17 +166,14 @@ fn draw_load_body(
     ui: &Ui, load: Option<&LoadView>, notice: Option<&mut LoadNotice>, diagnostics: &DiagnosticsState,
     popup: &mut LoadPopup,
 ) {
-    let escape = ui.is_key_pressed(Key::Escape);
     match (load, notice) {
         (Some(view), _) => {
             draw_load_heading(ui, view.title, &view.path);
             draw_load_progress(ui, &view.snapshot);
 
             if view.cancellable {
-                ui.separator();
-
-                let _disabled = ui.begin_disabled_with_cond(view.cancelling);
-                if ui.button(if view.cancelling { "Cancelling..." } else { "Cancel" }) || escape {
+                let label = if view.cancelling { "Cancelling..." } else { "Cancel" };
+                if dialog_buttons(ui, &[DialogButton::cancel(label).enabled(!view.cancelling)], true).is_some() {
                     popup.cancel = true;
                 }
             }
@@ -186,14 +183,15 @@ fn draw_load_body(
             draw_load_heading(ui, title, path);
             let lines = wrapped_lines(ui, message).clamp(LOAD_TEXT_MIN_LINES, LOAD_ERROR_MAX_LINES);
             draw_selectable_text(ui, "##load-error", message, lines, Some(SAVE_ERROR_COLOR));
-            ui.separator();
 
-            if ui.button("Close") || escape {
-                popup.dismiss = true;
-            }
-            ui.same_line();
-            if ui.button("Copy") {
-                popup.copy = Some(message.clone());
+            match dialog_buttons(
+                ui,
+                &[DialogButton::cancel("Close"), DialogButton::secondary("Copy Error")],
+                true,
+            ) {
+                Some(0) => popup.dismiss = true,
+                Some(_) => popup.copy = Some(message.clone()),
+                None => {},
             }
         },
 
@@ -215,15 +213,18 @@ fn draw_load_body(
 
                 let lines = wrapped_lines(ui, &text).clamp(LOAD_TEXT_MIN_LINES, LOAD_DIAGNOSTICS_LINES);
                 draw_selectable_text(ui, "##load-diagnostics", &mut text, lines, Some(color));
-                ui.separator();
 
-                if ui.button("Close") || escape {
-                    popup.dismiss = true;
-                }
-
-                ui.same_line();
-                if ui.button("Copy") {
-                    popup.copy = Some(text);
+                match dialog_buttons(
+                    ui,
+                    &[
+                        DialogButton::cancel("Close"),
+                        DialogButton::secondary("Copy Diagnostics"),
+                    ],
+                    true,
+                ) {
+                    Some(0) => popup.dismiss = true,
+                    Some(_) => popup.copy = Some(text),
+                    None => {},
                 }
             }
         },

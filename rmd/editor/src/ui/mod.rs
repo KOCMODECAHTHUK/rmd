@@ -945,14 +945,19 @@ impl UiState {
         )?;
         ui.text("Discard unsaved changes and load conflicts from Git?");
         let mut load_conflicts = None;
-        if ui.button("Discard and load") {
+        let pressed = common::dialog_buttons(
+            ui,
+            &[
+                common::DialogButton::cancel("Cancel"),
+                common::DialogButton::destructive("Discard and Load", false),
+            ],
+            true,
+        );
+        if pressed == Some(1) {
             load_conflicts = Some(id);
-            self.pending_conflict_reload = None;
-            ui.close_current_popup();
         }
 
-        ui.same_line();
-        if ui.button("Cancel") {
+        if pressed.is_some() {
             self.pending_conflict_reload = None;
             ui.close_current_popup();
         }
@@ -1097,7 +1102,7 @@ impl UiState {
 #[cfg(test)]
 mod tests {
     use core::path::TreePath;
-    use std::path::PathBuf;
+    use std::{cell::Cell, path::PathBuf};
 
     use dear_imgui_rs::DockLayout;
     use dmm::{Prefab, Size};
@@ -1108,6 +1113,7 @@ mod tests {
         DEFAULT_CUSTOM_FILL_BOUNDARY,
         IMGUI_CONTEXT,
         UiState,
+        common::button_width,
         fixtures::rectangle_context,
         git,
         menu::MenuActions,
@@ -1761,6 +1767,7 @@ mod tests {
             cancelling: false,
             cancellable: true,
         };
+        let widths = Cell::new([0.0_f32; 3]);
         let frame = |context: &mut dear_imgui_rs::Context,
                      state: &mut UiState,
                      session: &mut Session,
@@ -1771,6 +1778,11 @@ mod tests {
             let output = state
                 .draw(ui, session, settings, &mut themes, loading.then_some(&load))
                 .unwrap();
+            widths.set([
+                button_width(ui, "Reload Codebase and Retry"),
+                button_width(ui, "Close"),
+                ui.clone_style().item_spacing()[0],
+            ]);
             let is_open = ui.is_popup_open(super::coop::STATUS_POPUP);
             assert!(context.render_legacy().valid());
             (output.open, is_open)
@@ -1803,8 +1815,11 @@ mod tests {
             "the modal preserves the dockspace layout"
         );
         let padding = context.style().window_padding();
-        let close = [position[0] + padding[0] + 8.0, position[1] + size[1] - padding[1] - 8.0];
-        let retry = [close[0] + 80.0, close[1]];
+        let [retry_width, close_width, spacing] = widths.get();
+        let y = position[1] + size[1] - padding[1] - 8.0;
+        let right = position[0] + size[0] - padding[0];
+        let retry = [right - retry_width / 2.0, y];
+        let close = [right - retry_width - spacing - close_width / 2.0, y];
         for down in [false, true, false] {
             context.io_mut().add_mouse_pos_event(retry);
             context.io_mut().add_mouse_button_event(MouseButton::Left, down);

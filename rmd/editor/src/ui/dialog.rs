@@ -1,7 +1,7 @@
 use core::path::TreePath;
 use std::path::{Path, PathBuf};
 
-use dear_imgui_rs::{DragFlags, Key, Ui, WindowFlags};
+use dear_imgui_rs::{DragFlags, Ui, WindowFlags};
 use dmm::{Coord, MapFormat, Prefab, Size};
 use editor::{
     document::{DocumentId, MapDocument},
@@ -13,7 +13,7 @@ use super::{
     DIAGNOSTIC_WARNING_COLOR,
     MAX_CUSTOM_FILL_SEARCH_RESULTS,
     UiState,
-    common::{begin_centered_modal, dpi},
+    common::{DialogButton, begin_centered_modal, dialog_buttons, dpi},
     draw_type_path_search,
 };
 use crate::{session::Session, settings::KeybindPreset};
@@ -277,13 +277,18 @@ pub(super) fn draw_keybind_preset_dialog(ui: &Ui, open: &mut bool) -> Option<Key
 
     ui.text("Which keybinding preset would you prefer?");
     ui.text_disabled("You can customize individual bindings later in Settings.");
-    ui.dummy([0.0, ui.frame_height() * 0.25]);
 
-    let selected = if ui.button("Default") {
-        Some(KeybindPreset::Default)
-    } else {
-        ui.same_line();
-        ui.button("StrongDMM").then_some(KeybindPreset::StrongDmm)
+    let selected = match dialog_buttons(
+        ui,
+        &[
+            DialogButton::secondary("Use Default"),
+            DialogButton::secondary("Use StrongDMM"),
+        ],
+        true,
+    ) {
+        Some(0) => Some(KeybindPreset::Default),
+        Some(_) => Some(KeybindPreset::StrongDmm),
+        None => None,
     };
 
     if selected.is_some() {
@@ -352,26 +357,25 @@ pub(super) fn draw_new_map_dialog(ui: &Ui, session: &mut Session, dialog: &mut O
         ui.text_colored(SAVE_ERROR_COLOR, error);
     }
 
-    ui.separator();
-
-    if ui.button("Cancel") || ui.is_key_pressed(Key::Escape) {
-        close = true;
-        ui.close_current_popup();
-    }
-
-    ui.same_line();
-
     let valid_dimensions = [state.width, state.height, state.levels]
         .into_iter()
         .all(|dimension| dimension > 0);
     let can_create = !state.path.trim().is_empty() && valid_dimensions;
-    let clicked = {
-        let _disabled = ui.begin_disabled_with_cond(!can_create);
+    let pressed = dialog_buttons(
+        ui,
+        &[
+            DialogButton::cancel("Cancel"),
+            DialogButton::primary("Create Map").enabled(can_create),
+        ],
+        true,
+    );
 
-        ui.button("Create")
-    };
+    if pressed == Some(0) {
+        close = true;
+        ui.close_current_popup();
+    }
 
-    if can_create && (clicked || submitted) {
+    if can_create && (pressed == Some(1) || submitted) {
         let result = session
             .codebase_dir()
             .ok_or_else(|| String::from("no codebase is loaded"))
@@ -469,24 +473,29 @@ pub(super) fn draw_resize_map_dialog(
     }
 
     wrap.end();
-    ui.separator();
 
-    let shortcuts = !state.fill.captures_keys();
-    if ui.button("Cancel") || (shortcuts && ui.is_key_pressed(Key::Escape)) {
+    let changed = (width, height) != (size.x, size.y);
+    let resize_button = if losses == 0 {
+        DialogButton::primary("Resize Map")
+    } else {
+        DialogButton::destructive("Resize Map", true)
+    };
+    let pressed = dialog_buttons(
+        ui,
+        &[
+            DialogButton::cancel("Cancel"),
+            resize_button.enabled(changed && fill.is_some()),
+        ],
+        !state.fill.captures_keys(),
+    );
+
+    if pressed == Some(0) {
         close = true;
         ui.close_current_popup();
     }
 
-    ui.same_line();
-    let changed = (width, height) != (size.x, size.y);
-    let clicked = {
-        let _disabled = ui.begin_disabled_with_cond(!changed || fill.is_none());
-
-        ui.button("Resize")
-    };
-
     if changed
-        && clicked
+        && pressed == Some(1)
         && let Some(fill) = fill
     {
         match session.resize_map(width, height, &fill) {
@@ -535,15 +544,18 @@ pub(super) fn draw_go_to_dialog(ui: &Ui, session: &Session, dialog: &mut Option<
         *value = (*value).clamp(1, max.max(1) as i32);
     }
 
-    ui.separator();
+    let pressed = dialog_buttons(
+        ui,
+        &[DialogButton::cancel("Cancel"), DialogButton::primary("Go to Tile")],
+        true,
+    );
 
-    if ui.button("Cancel") || ui.is_key_pressed(Key::Escape) {
+    if pressed == Some(0) {
         close = true;
         ui.close_current_popup();
     }
 
-    ui.same_line();
-    if ui.button("Go") || ui.is_key_pressed(Key::Enter) || ui.is_key_pressed(Key::KeypadEnter) {
+    if pressed == Some(1) {
         target = Some(Coord::new(state.x as u32, state.y as u32, state.z as u32));
         close = true;
         ui.close_current_popup();
@@ -583,23 +595,21 @@ pub(super) fn draw_new_level_dialog(
         ui.text_colored(SAVE_ERROR_COLOR, error);
     }
 
-    ui.separator();
+    let pressed = dialog_buttons(
+        ui,
+        &[
+            DialogButton::cancel("Cancel"),
+            DialogButton::primary("Create Level").enabled(fill.is_some()),
+        ],
+        !state.fill.captures_keys(),
+    );
 
-    let shortcuts = !state.fill.captures_keys();
-    if ui.button("Cancel") || (shortcuts && ui.is_key_pressed(Key::Escape)) {
+    if pressed == Some(0) {
         close = true;
         ui.close_current_popup();
     }
 
-    ui.same_line();
-    let clicked = {
-        let _disabled = ui.begin_disabled_with_cond(fill.is_none());
-
-        ui.button("Create")
-    };
-
-    let submitted = shortcuts && (ui.is_key_pressed(Key::Enter) || ui.is_key_pressed(Key::KeypadEnter));
-    if (clicked || submitted)
+    if pressed == Some(1)
         && let Some(fill) = fill
     {
         match session.create_level(state.document, &fill) {
@@ -652,20 +662,21 @@ pub(super) fn draw_delete_level_dialog(ui: &Ui, session: &mut Session, dialog: &
         ui.text_colored(SAVE_ERROR_COLOR, error);
     }
 
-    ui.separator();
-    if ui.button("Cancel") || ui.is_key_pressed(Key::Escape) {
+    let pressed = dialog_buttons(
+        ui,
+        &[
+            DialogButton::cancel("Cancel"),
+            DialogButton::destructive("Delete Level", true).enabled(is_valid),
+        ],
+        true,
+    );
+
+    if pressed == Some(0) {
         close = true;
         ui.close_current_popup();
     }
 
-    ui.same_line();
-
-    let clicked = {
-        let _disabled = ui.begin_disabled_with_cond(!is_valid);
-        ui.button("Delete")
-    };
-
-    if !close && is_valid && (clicked || ui.is_key_pressed(Key::Enter) || ui.is_key_pressed(Key::KeypadEnter)) {
+    if is_valid && pressed == Some(1) {
         match session.delete_level(state.document, state.z) {
             Ok(()) => {
                 close = true;
@@ -799,26 +810,25 @@ pub(super) fn draw_save_dialog(
         ui.text_colored(SAVE_ERROR_COLOR, error);
     }
 
-    ui.separator();
+    let path = state.path.trim();
+    let can_save = !path.is_empty();
+    let pressed = dialog_buttons(
+        ui,
+        &[
+            DialogButton::cancel("Cancel"),
+            DialogButton::primary("Save Map").enabled(can_save),
+        ],
+        true,
+    );
 
-    if ui.button("Cancel") || ui.is_key_pressed(Key::Escape) {
+    if pressed == Some(0) {
         outcome = Some(SaveDialogOutcome::Cancelled {
             close_after_save: state.close_after_save,
         });
         ui.close_current_popup();
     }
 
-    ui.same_line();
-
-    let path = state.path.trim();
-    let can_save = !path.is_empty();
-    let clicked = {
-        let _disabled = ui.begin_disabled_with_cond(!can_save);
-
-        ui.button("Save")
-    };
-
-    if outcome.is_none() && can_save && (clicked || submitted) {
+    if outcome.is_none() && can_save && (pressed == Some(1) || submitted) {
         let result = if session.set_active_document(state.document) {
             session.save_map_as(Path::new(path), state.format)
         } else {
@@ -871,15 +881,19 @@ pub(super) fn draw_fill_limit_warning(
     ui.text(format!("This fill would change more than {} tiles.", warning.limit));
     ui.text("The operation may make the editor unresponsive.");
     ui.text("Do you want to fill it anyway?");
-    ui.separator();
 
-    if ui.button("Cancel") || ui.is_key_pressed(Key::Escape) {
+    let pressed = dialog_buttons(
+        ui,
+        &[DialogButton::cancel("Cancel"), DialogButton::primary("Fill Anyway")],
+        true,
+    );
+
+    if pressed == Some(0) {
         dismiss = true;
         ui.close_current_popup();
     }
 
-    ui.same_line();
-    if ui.button("Fill Anyway") {
+    if pressed == Some(1) {
         fill_anyway = true;
         dismiss = true;
         ui.close_current_popup();
@@ -947,23 +961,21 @@ impl UiState {
             ui.text(format!("{unsaved} maps have unsaved changes."));
         }
         ui.text("Exit without saving?");
-        ui.dummy([0.0, ui.frame_height() * 0.25]);
 
-        if ui.button("Cancel") || ui.is_key_pressed(Key::Escape) {
+        let pressed = dialog_buttons(
+            ui,
+            &[
+                DialogButton::cancel("Cancel"),
+                DialogButton::destructive("Exit Without Saving", false),
+            ],
+            true,
+        );
+        if pressed.is_some() {
             self.exit_requested = false;
             ui.close_current_popup();
-
-            return false;
-        }
-        ui.same_line();
-        if ui.button("Exit without saving") {
-            self.exit_requested = false;
-            ui.close_current_popup();
-
-            return true;
         }
 
-        false
+        pressed == Some(1)
     }
 
     pub(super) fn request_close(&mut self, session: &mut Session, ids: impl IntoIterator<Item = DocumentId>) {
@@ -1015,9 +1027,29 @@ impl UiState {
                 self.close_queue.len() - 1
             ));
         }
-        ui.dummy([0.0, ui.frame_height() * 0.25]);
 
-        if ui.button("Save") {
+        let pressed = dialog_buttons(
+            ui,
+            &[
+                DialogButton::cancel("Cancel"),
+                DialogButton::destructive("Discard Changes", false),
+                DialogButton::primary("Save Map"),
+            ],
+            true,
+        );
+
+        if pressed == Some(0) {
+            self.close_queue.clear();
+            ui.close_current_popup();
+        }
+
+        if pressed == Some(1) {
+            self.close_map_view(session, id);
+            self.close_queue.pop_front();
+            ui.close_current_popup();
+        }
+
+        if pressed == Some(2) {
             session.set_active_document(id);
             match session.map_path().map(Path::to_path_buf).filter(|_| writable) {
                 Some(path) => {
@@ -1045,17 +1077,6 @@ impl UiState {
                     ui.close_current_popup();
                 },
             }
-        }
-        ui.same_line();
-        if ui.button("Discard") {
-            self.close_map_view(session, id);
-            self.close_queue.pop_front();
-            ui.close_current_popup();
-        }
-        ui.same_line();
-        if ui.button("Cancel") || ui.is_key_pressed(Key::Escape) {
-            self.close_queue.clear();
-            ui.close_current_popup();
         }
     }
 }
@@ -1179,8 +1200,12 @@ mod tests {
                 .unwrap();
             self.close_open = ui.is_popup_open("Unsaved changes##close-map");
             self.save_open = ui.is_popup_open("Save map##save-map");
-            self.close_buttons = button_centers(ui, c"Unsaved changes##close-map", &["Save", "Discard", "Cancel"]);
-            self.save_buttons = button_centers(ui, c"Save map##save-map", &["Cancel", "Save"]);
+            self.close_buttons = button_centers(
+                ui,
+                c"Unsaved changes##close-map",
+                &["Cancel", "Discard Changes", "Save Map"],
+            );
+            self.save_buttons = button_centers(ui, c"Save map##save-map", &["Cancel", "Save Map"]);
             finish_frame(&mut self.context);
         }
 
@@ -1269,7 +1294,12 @@ mod tests {
             return Vec::new();
         }
         let style = ui.clone_style();
-        let mut x = window.Pos.x + style.window_padding()[0];
+        let total = labels
+            .iter()
+            .map(|label| ui.calc_text_size(label)[0] + 2.0 * style.frame_padding()[0])
+            .sum::<f32>()
+            + style.item_spacing()[0] * labels.len().saturating_sub(1) as f32;
+        let mut x = window.Pos.x + window.Size.x - style.window_padding()[0] - total;
         let y = window.Pos.y + window.Size.y - style.window_padding()[1] - ui.frame_height() / 2.0;
         labels
             .iter()
@@ -1345,7 +1375,7 @@ mod tests {
             set_desktop_geometry(&mut app.context, position, [900.0, 600.0]);
             app.settle();
             assert_window_centered(&mut app.context, c"Unsaved changes##close-map");
-            app.click(app.close_buttons[0]);
+            app.click(app.close_buttons[2]);
             assert!(app.save_open && !app.close_open);
             assert_window_centered(&mut app.context, c"Save map##save-map");
         }
@@ -1370,7 +1400,7 @@ mod tests {
             if escape {
                 app.escape();
             } else {
-                app.click(app.close_buttons[2]);
+                app.click(app.close_buttons[0]);
             }
             assert!(!app.close_open);
             assert!(app.state.close_queue.is_empty());
@@ -1466,7 +1496,7 @@ mod tests {
         app.select(id);
         app.close_tab(id);
         app.assert_selected_map(id);
-        app.click(app.close_buttons[0]);
+        app.click(app.close_buttons[2]);
         assert!(file.is_file());
         assert!(app.session.state.document(id).is_none());
         assert!(!app.close_open);
@@ -1481,7 +1511,7 @@ mod tests {
         let id = app.add_map(&dir.0, true, false);
         app.select(id);
         app.close_tab(id);
-        app.click(app.close_buttons[0]);
+        app.click(app.close_buttons[2]);
         assert!(app.close_open);
         assert!(app.state.open_error.is_some());
         assert!(app.session.state.document(id).unwrap().is_dirty());
@@ -1499,7 +1529,7 @@ mod tests {
         let next = app.add_map("next.dmm", false, false);
         app.select(id);
         app.close_tab(id);
-        app.click(app.close_buttons[0]);
+        app.click(app.close_buttons[2]);
         assert!(app.save_open && !app.close_open);
         assert_eq!(app.state.close_queue.front(), Some(&id));
         assert!(app.state.save_dialog.as_ref().unwrap().close_after_save);
@@ -1537,7 +1567,7 @@ mod tests {
             app.state.close_queue.iter().copied().collect::<Vec<_>>(),
             [first, second]
         );
-        app.click(app.close_buttons[0]);
+        app.click(app.close_buttons[2]);
         assert!(app.save_open && !app.close_open);
         app.click(app.save_buttons[0]);
         assert!(!app.save_open && !app.close_open);
@@ -1559,7 +1589,7 @@ mod tests {
         app.select(first);
         app.state.request_close(&mut app.session, [first, second]);
         app.settle();
-        app.click(app.close_buttons[0]);
+        app.click(app.close_buttons[2]);
         app.click(app.save_buttons[1]);
         assert!(file.is_file());
         assert!(app.session.state.document(first).is_none());
@@ -1857,9 +1887,12 @@ mod tests {
             let mut remembered = None;
             let mut resized = false;
 
-            click_dialog_button(&mut context, c"Resize map##resize-map", &["Cancel", "Resize"], |ui| {
-                resized |= draw_resize_map_dialog(ui, &mut session, &mut dialog, &mut remembered)
-            });
+            click_dialog_button(
+                &mut context,
+                c"Resize map##resize-map",
+                &["Cancel", "Resize Map"],
+                |ui| resized |= draw_resize_map_dialog(ui, &mut session, &mut dialog, &mut remembered),
+            );
 
             assert!(resized);
             assert!(dialog.is_none());
@@ -1963,7 +1996,7 @@ mod tests {
             });
             let mut created = false;
 
-            click_dialog_button(&mut context, c"New map##new-map", &["Cancel", "Create"], |ui| {
+            click_dialog_button(&mut context, c"New map##new-map", &["Cancel", "Create Map"], |ui| {
                 created |= draw_new_map_dialog(ui, &mut session, &mut dialog).1;
             });
 
