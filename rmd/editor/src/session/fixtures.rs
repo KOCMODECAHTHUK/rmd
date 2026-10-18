@@ -519,7 +519,7 @@ pub(super) fn assert_render_cache_matches_rebuild(session: &Session) {
         &session.textures,
         document,
         editor::frame::FrameRenderOptions {
-            node_types: None,
+            node_types: Some(&session.active_cache().node_types),
             visibility: &session.type_visibility,
             tile_size: session.options.tile_size,
             appearances: editor::bake::appearances(session.active_cache().bake.as_ref()),
