@@ -454,7 +454,7 @@ pub(super) mod tests {
         assert_eq!(instances.live_sprites().last().unwrap().owner, table);
 
         assert_eq!(
-            document.move_instance(table, Coord::new(20, 1, 1), "move table", &[], None),
+            document.move_instance(&tree, table, Coord::new(20, 1, 1), "move table", &[], None),
             Some(true)
         );
         update_prefab(&mut instances, &tree, &icons, &textures, &document, table, 32);

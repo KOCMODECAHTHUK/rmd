@@ -253,9 +253,9 @@ impl Session {
         &mut self, to_coord: Coord, label: impl Into<String>, mutations: &[VarMutation], group: Option<EditGroupId>,
     ) -> Option<bool> {
         let selected = self.selected_instance()?;
-        let document = self.state.active_document_mut()?;
+        let (environment, document) = self.state.active_pair_mut()?;
 
-        let changed = document.move_instance(selected, to_coord, label, mutations, group)?;
+        let changed = document.move_instance(&environment.tree, selected, to_coord, label, mutations, group)?;
 
         if changed {
             self.update_instance(selected);
