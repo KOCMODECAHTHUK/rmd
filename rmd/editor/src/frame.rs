@@ -2392,7 +2392,7 @@ mod tests {
         let mut instances = build(&tree, &icons, &textures, &document, 32);
 
         document
-            .move_instance(owner, dmm::Coord::new(2, 1, 1), "move area", &[], None)
+            .move_instance(&tree, owner, dmm::Coord::new(2, 1, 1), "move area", &[], None)
             .unwrap();
         let update = update_prefab(&mut instances, &tree, &icons, &textures, &document, owner, 32);
         assert!(matches!(

@@ -17,7 +17,7 @@ use crate::{
     focus::AreaFocus,
     grid::{Grid, LevelCells},
     patch,
-    tool::{BlockSelectionMode, SelectionMask},
+    tool::{BlockSelectionMode, PlacementKind, SelectionMask, insertion_index, placement_kind},
 };
 
 pub fn sanitize_vars(map: &mut Map, tree: &ObjectTree) -> usize {
@@ -469,8 +469,8 @@ impl MapDocument {
     pub fn identical_instances(&self, prefab: &Prefab) -> Vec<PrefabInstanceId> { self.map.identical(prefab) }
 
     pub fn move_instance(
-        &mut self, id: PrefabInstanceId, to_coord: Coord, label: impl Into<String>, mutations: &[VarMutation],
-        group: Option<EditGroupId>,
+        &mut self, tree: &ObjectTree, id: PrefabInstanceId, to_coord: Coord, label: impl Into<String>,
+        mutations: &[VarMutation], group: Option<EditGroupId>,
     ) -> Option<bool> {
         let location = self.instance_location(id)?;
         let size = self.map.size();
@@ -495,7 +495,8 @@ impl MapDocument {
             }
         }
         let mut destination = self.placed_tile(to_coord).unwrap_or_default();
-        destination.push(moved);
+        let kind = placement_kind(tree, moved.prefab()).unwrap_or(PlacementKind::Atom);
+        destination.insert(insertion_index(tree, &destination, kind), moved);
 
         let mut edit = Edit::new(label);
         edit.change(self, location.coord, source);
@@ -925,6 +926,7 @@ mod tests {
 
     use dmm::{Map, MapFormat, Prefab, Size, parser, writer::MapWriter};
     use net::LevelContents;
+    use objtree::ObjectTree;
 
     use super::{Coord, MapDocument, Selection, VarMutation, sanitize_vars};
     use crate::{
@@ -1403,6 +1405,7 @@ mod tests {
 
         assert_eq!(
             document.move_instance(
+                &ObjectTree::default(),
                 id,
                 destination,
                 "re-anchor table",
@@ -1457,6 +1460,7 @@ mod tests {
 
         assert_eq!(
             document.move_instance(
+                &ObjectTree::default(),
                 id,
                 source,
                 "change pixel offset",
@@ -1466,7 +1470,14 @@ mod tests {
             Some(true),
         );
         assert_eq!(
-            document.move_instance(id, Coord::new(9, 9, 1), "off the map", &[], None),
+            document.move_instance(
+                &ObjectTree::default(),
+                id,
+                Coord::new(9, 9, 1),
+                "off the map",
+                &[],
+                None
+            ),
             Some(false)
         );
         assert_eq!(document.instance_location(id).unwrap().coord, source);
@@ -1684,7 +1695,7 @@ mod tests {
         // a move that leaves the region would otherwise clear its source and drop the instance
         let moved = document.instance_ids_at(Coord::new(2, 1, 1))[1];
         assert_eq!(
-            document.move_instance(moved, outside, "move out", &[], None),
+            document.move_instance(&ObjectTree::default(), moved, outside, "move out", &[], None),
             Some(false)
         );
         assert_eq!(
