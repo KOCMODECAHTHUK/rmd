@@ -281,9 +281,9 @@ mod tests {
         let sheet_width = width * cells;
         let mut pixels = vec![0u8; (sheet_width * height * 4) as usize];
 
-        for (index, pixel) in pixels.chunks_exact_mut(4).enumerate() {
+        for (index, pixel) in pixels.as_chunks_mut::<4>().0.iter_mut().enumerate() {
             let cell = (index as u32 % sheet_width) / width;
-            pixel.copy_from_slice(&[cell as u8 + 1, 0, 0, 255]);
+            *pixel = [cell as u8 + 1, 0, 0, 255];
         }
 
         IconFile {

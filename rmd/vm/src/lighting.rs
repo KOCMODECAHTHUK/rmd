@@ -942,7 +942,7 @@ pub(crate) fn color_bytes(text: &str) -> Option<([u8; 4], bool)> {
             }
         },
         6 | 8 => {
-            for (slot, pair) in out.iter_mut().zip(hex.as_bytes().chunks_exact(2)) {
+            for (slot, pair) in out.iter_mut().zip(hex.as_bytes().as_chunks::<2>().0) {
                 *slot = u8::from_str_radix(std::str::from_utf8(pair).ok()?, 16).ok()?;
             }
         },

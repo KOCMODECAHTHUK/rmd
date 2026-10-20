@@ -91,16 +91,14 @@ fn to_rgba8(info: &OutputInfo, buffer: Vec<u8>) -> Result<Vec<u8>, IconError> {
 
     match info.color_type {
         ColorType::Rgb => {
-            for pixel in buffer.chunks_exact(3) {
+            for pixel in buffer.as_chunks::<3>().0 {
                 rgba.extend_from_slice(pixel);
                 rgba.push(255);
             }
         },
         ColorType::GrayscaleAlpha => {
-            for pixel in buffer.chunks_exact(2) {
-                if let [gray, alpha] = *pixel {
-                    rgba.extend_from_slice(&[gray, gray, gray, alpha]);
-                }
+            for &[gray, alpha] in buffer.as_chunks::<2>().0 {
+                rgba.extend_from_slice(&[gray, gray, gray, alpha]);
             }
         },
         ColorType::Grayscale => {

@@ -1145,9 +1145,7 @@ mod tests {
         ]);
 
         for level in &mut map.grid {
-            for cell in &mut level[0] {
-                *cell = key;
-            }
+            level[0].fill(key);
         }
 
         map

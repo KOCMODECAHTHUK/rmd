@@ -130,7 +130,8 @@ fn guest_out_of_date(name: &str) -> (PathBuf, Session, PathBuf, Session, Documen
     poll_until(&mut [&mut host], |sessions| {
         sessions[0]
             .coop()
-            .is_some_and(|coop| coop.shared_maps.contains_key("_maps/a.dmm"))
+            .and_then(|coop| coop.shared_maps.get("_maps/a.dmm"))
+            .is_some_and(SharedMap::is_ready)
     });
 
     let port = host.coop().and_then(Coop::host).unwrap().port();
