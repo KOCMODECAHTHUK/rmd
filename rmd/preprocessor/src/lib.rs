@@ -16,8 +16,7 @@ use std::{
 };
 
 use lexer::{
-    IndentState,
-    Lexer,
+    IndentState, Lexer,
     token::{ContextMacro, Token},
 };
 use rustc_hash::FxHashMap;
@@ -38,9 +37,13 @@ pub struct SourceCache<'a> {
 }
 
 impl SourceCache<'_> {
-    pub fn len(&self) -> usize { self.files.len() }
+    pub fn len(&self) -> usize {
+        self.files.len()
+    }
 
-    pub fn is_empty(&self) -> bool { self.files.is_empty() }
+    pub fn is_empty(&self) -> bool {
+        self.files.is_empty()
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -214,7 +217,9 @@ pub struct Preprocessed<'a> {
 }
 
 impl Preprocessed<'_> {
-    pub fn is_ok(&self) -> bool { !self.errors.iter().any(PreprocessError::is_fatal) }
+    pub fn is_ok(&self) -> bool {
+        !self.errors.iter().any(PreprocessError::is_fatal)
+    }
 }
 
 type ProgressHook<'a> = Box<dyn FnMut(&Path) -> bool + 'a>;
@@ -352,7 +357,9 @@ impl<'a> Preprocessor<'a> {
         self
     }
 
-    pub fn sources(&self) -> &SourceMap<'a> { &self.sources }
+    pub fn sources(&self) -> &SourceMap<'a> {
+        &self.sources
+    }
 
     pub fn run(mut self, entry: impl AsRef<Path>) -> PreprocessResult<Preprocessed<'a>> {
         let mut files = std::mem::take(&mut self.prelude);

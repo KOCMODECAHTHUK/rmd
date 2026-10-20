@@ -305,7 +305,9 @@ mod tests {
             .collect()
     }
 
-    fn set_name(name: &str) -> [VarMutation; 1] { [VarMutation::Set("name".into(), Value::Text(name.to_string()))] }
+    fn set_name(name: &str) -> [VarMutation; 1] {
+        [VarMutation::Set("name".into(), Value::Text(name.to_string()))]
+    }
 
     #[test]
     fn an_identical_scope_edit_changes_every_matching_placement_in_one_undo() {

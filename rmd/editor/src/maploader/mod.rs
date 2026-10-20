@@ -56,4 +56,6 @@ pub fn resolve(name: &str) -> Option<MapLoaderKind> {
     }
 }
 
-pub(crate) fn resolved_path(path: &Path) -> PathBuf { fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf()) }
+pub(crate) fn resolved_path(path: &Path) -> PathBuf {
+    fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+}

@@ -128,7 +128,9 @@ pub struct Progress {
 }
 
 impl Progress {
-    pub fn new() -> Self { Self::default() }
+    pub fn new() -> Self {
+        Self::default()
+    }
 
     pub fn enter(&self, stage: Stage, total: usize) {
         self.stage.store(stage.code(), Ordering::Relaxed);
@@ -142,7 +144,9 @@ impl Progress {
         self.set_detail(detail);
     }
 
-    pub fn set_done(&self, done: usize) { self.done.store(done, Ordering::Relaxed); }
+    pub fn set_done(&self, done: usize) {
+        self.done.store(done, Ordering::Relaxed);
+    }
 
     pub fn set_detail(&self, detail: &str) {
         if let Ok(mut current) = self.detail.lock() {
@@ -160,9 +164,13 @@ impl Progress {
         }
     }
 
-    pub fn cancel(&self) { self.cancelled.store(true, Ordering::Relaxed); }
+    pub fn cancel(&self) {
+        self.cancelled.store(true, Ordering::Relaxed);
+    }
 
-    pub fn is_cancelled(&self) -> bool { self.cancelled.load(Ordering::Relaxed) }
+    pub fn is_cancelled(&self) -> bool {
+        self.cancelled.load(Ordering::Relaxed)
+    }
 }
 
 #[cfg(test)]

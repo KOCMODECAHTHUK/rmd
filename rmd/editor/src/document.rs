@@ -51,11 +51,15 @@ impl DocumentId {
         Self(NEXT.fetch_add(1, Ordering::Relaxed))
     }
 
-    pub const fn get(self) -> u64 { self.0 }
+    pub const fn get(self) -> u64 {
+        self.0
+    }
 }
 
 impl Default for DocumentId {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 pub struct MapDocument {
@@ -95,7 +99,9 @@ impl Journal {
         self.reshaped |= other.reshaped;
     }
 
-    pub fn is_empty(&self) -> bool { self.coords.is_empty() && !self.reshaped }
+    pub fn is_empty(&self) -> bool {
+        self.coords.is_empty() && !self.reshaped
+    }
 
     fn shift(&mut self, change: LevelChange) {
         self.coords = mem::take(&mut self.coords)
@@ -123,7 +129,9 @@ impl<'a> PrefabInstance<'a> {
         Self { id, location, prefab }
     }
 
-    pub fn prefab(&self) -> &'a Prefab { self.prefab }
+    pub fn prefab(&self) -> &'a Prefab {
+        self.prefab
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -133,11 +141,17 @@ pub struct PlacedPrefab {
 }
 
 impl PlacedPrefab {
-    pub fn id(&self) -> PrefabInstanceId { self.id }
+    pub fn id(&self) -> PrefabInstanceId {
+        self.id
+    }
 
-    pub fn prefab(&self) -> &Prefab { &self.prefab }
+    pub fn prefab(&self) -> &Prefab {
+        &self.prefab
+    }
 
-    pub fn prefab_mut(&mut self) -> &mut Prefab { &mut self.prefab }
+    pub fn prefab_mut(&mut self) -> &mut Prefab {
+        &mut self.prefab
+    }
 }
 
 pub type PlacedTile = Vec<PlacedPrefab>;
@@ -177,9 +191,13 @@ impl Selection {
             && (self.min.y..=self.max.y).contains(&coord.y)
     }
 
-    pub fn width(&self) -> u32 { self.max.x - self.min.x + 1 }
+    pub fn width(&self) -> u32 {
+        self.max.x - self.min.x + 1
+    }
 
-    pub fn height(&self) -> u32 { self.max.y - self.min.y + 1 }
+    pub fn height(&self) -> u32 {
+        self.max.y - self.min.y + 1
+    }
 
     pub fn with_min(&self, min: Coord) -> Option<Self> {
         if min.z != self.min.z || self.max.z != self.min.z || self.max.x < self.min.x || self.max.y < self.min.y {
@@ -225,13 +243,21 @@ impl MapDocument {
         }
     }
 
-    pub fn start_journal(&mut self) { self.journal = Some(Journal::default()); }
+    pub fn start_journal(&mut self) {
+        self.journal = Some(Journal::default());
+    }
 
-    pub fn set_read_only(&mut self, read_only: bool) { self.read_only = read_only; }
+    pub fn set_read_only(&mut self, read_only: bool) {
+        self.read_only = read_only;
+    }
 
-    pub fn is_read_only(&self) -> bool { self.read_only }
+    pub fn is_read_only(&self) -> bool {
+        self.read_only
+    }
 
-    pub fn is_journaling(&self) -> bool { self.journal.is_some() }
+    pub fn is_journaling(&self) -> bool {
+        self.journal.is_some()
+    }
 
     pub fn take_journal(&mut self) -> Option<Journal> {
         let journal = self.journal.as_mut().filter(|journal| !journal.is_empty())?;
@@ -289,9 +315,13 @@ impl MapDocument {
         affected
     }
 
-    pub fn id(&self) -> DocumentId { self.id }
+    pub fn id(&self) -> DocumentId {
+        self.id
+    }
 
-    pub fn generation(&self) -> u64 { self.generation }
+    pub fn generation(&self) -> u64 {
+        self.generation
+    }
 
     pub fn selection_mask(&self) -> Option<SelectionMask> {
         self.selection
@@ -348,23 +378,41 @@ impl MapDocument {
             .unwrap_or_else(|| "untitled".to_string())
     }
 
-    pub fn is_dirty(&self) -> bool { self.needs_initial_save || self.pending_write || self.history.is_dirty() }
+    pub fn is_dirty(&self) -> bool {
+        self.needs_initial_save || self.pending_write || self.history.is_dirty()
+    }
 
-    pub fn needs_initial_save(&self) -> bool { self.needs_initial_save }
+    pub fn needs_initial_save(&self) -> bool {
+        self.needs_initial_save
+    }
 
-    pub fn mark_unsaved(&mut self) { self.pending_write = true; }
+    pub fn mark_unsaved(&mut self) {
+        self.pending_write = true;
+    }
 
-    pub fn format(&self) -> MapFormat { self.format }
+    pub fn format(&self) -> MapFormat {
+        self.format
+    }
 
-    pub fn to_map(&self) -> Map { self.map.to_map(&self.baseline, self.format) }
+    pub fn to_map(&self) -> Map {
+        self.map.to_map(&self.baseline, self.format)
+    }
 
-    pub fn instance_ids_at(&self, coord: Coord) -> &[PrefabInstanceId] { self.map.ids_at(coord) }
+    pub fn instance_ids_at(&self, coord: Coord) -> &[PrefabInstanceId] {
+        self.map.ids_at(coord)
+    }
 
-    pub fn instance_location(&self, id: PrefabInstanceId) -> Option<PrefabLocation> { self.map.location(id) }
+    pub fn instance_location(&self, id: PrefabInstanceId) -> Option<PrefabLocation> {
+        self.map.location(id)
+    }
 
-    pub fn prefab_instance(&self, id: PrefabInstanceId) -> Option<PrefabInstance<'_>> { self.map.prefab_instance(id) }
+    pub fn prefab_instance(&self, id: PrefabInstanceId) -> Option<PrefabInstance<'_>> {
+        self.map.prefab_instance(id)
+    }
 
-    pub fn prefab_instances(&self) -> impl Iterator<Item = PrefabInstance<'_>> { self.map.prefab_instances() }
+    pub fn prefab_instances(&self) -> impl Iterator<Item = PrefabInstance<'_>> {
+        self.map.prefab_instances()
+    }
 
     pub fn selected_instance(&self) -> Option<PrefabInstanceId> {
         self.selected_instance
@@ -466,7 +514,9 @@ impl MapDocument {
     }
 
     /// Every placement of exactly `prefab`, on every level
-    pub fn identical_instances(&self, prefab: &Prefab) -> Vec<PrefabInstanceId> { self.map.identical(prefab) }
+    pub fn identical_instances(&self, prefab: &Prefab) -> Vec<PrefabInstanceId> {
+        self.map.identical(prefab)
+    }
 
     pub fn move_instance(
         &mut self, tree: &ObjectTree, id: PrefabInstanceId, to_coord: Coord, label: impl Into<String>,
@@ -550,7 +600,9 @@ impl MapDocument {
         self.selection_mode = selection_mode;
     }
 
-    pub fn selection(&self) -> Option<&Selection> { self.selection.as_ref() }
+    pub fn selection(&self) -> Option<&Selection> {
+        self.selection.as_ref()
+    }
 
     fn restore_selection(&mut self, mask: Option<SelectionMask>) {
         self.selection = mask.map(|mask| mask.bounds);
@@ -560,17 +612,29 @@ impl MapDocument {
         }
     }
 
-    pub fn set_focus(&mut self, focus: Option<AreaFocus>) { self.focus = focus; }
+    pub fn set_focus(&mut self, focus: Option<AreaFocus>) {
+        self.focus = focus;
+    }
 
-    pub fn focus(&self) -> Option<&AreaFocus> { self.focus.as_ref().filter(|focus| focus.seed().z == self.z) }
+    pub fn focus(&self) -> Option<&AreaFocus> {
+        self.focus.as_ref().filter(|focus| focus.seed().z == self.z)
+    }
 
-    pub fn focus_on_any_level(&self) -> Option<&AreaFocus> { self.focus.as_ref() }
+    pub fn focus_on_any_level(&self) -> Option<&AreaFocus> {
+        self.focus.as_ref()
+    }
 
-    pub fn allows_edit_at(&self, coord: Coord) -> bool { !self.read_only && self.is_within_focus(coord) }
+    pub fn allows_edit_at(&self, coord: Coord) -> bool {
+        !self.read_only && self.is_within_focus(coord)
+    }
 
-    pub fn is_within_focus(&self, coord: Coord) -> bool { self.focus.as_ref().is_none_or(|focus| focus.allows(coord)) }
+    pub fn is_within_focus(&self, coord: Coord) -> bool {
+        self.focus.as_ref().is_none_or(|focus| focus.allows(coord))
+    }
 
-    pub fn apply(&mut self, edit: Edit) -> bool { self.apply_grouped(edit, None) }
+    pub fn apply(&mut self, edit: Edit) -> bool {
+        self.apply_grouped(edit, None)
+    }
 
     pub fn apply_grouped(&mut self, edit: Edit, group: Option<EditGroupId>) -> bool {
         if self.read_only
@@ -605,7 +669,9 @@ impl MapDocument {
         true
     }
 
-    pub fn undo(&mut self) -> bool { self.undo_with_affected().is_some() }
+    pub fn undo(&mut self) -> bool {
+        self.undo_with_affected().is_some()
+    }
 
     pub fn undo_with_affected(&mut self) -> Option<Vec<PrefabInstanceId>> {
         if self.read_only {
@@ -640,7 +706,9 @@ impl MapDocument {
         affected
     }
 
-    pub fn redo(&mut self) -> bool { self.redo_with_affected().is_some() }
+    pub fn redo(&mut self) -> bool {
+        self.redo_with_affected().is_some()
+    }
 
     pub fn redo_with_affected(&mut self) -> Option<Vec<PrefabInstanceId>> {
         if self.read_only {
@@ -683,9 +751,13 @@ impl MapDocument {
             .collect()
     }
 
-    pub fn undo_label(&self) -> Option<&str> { self.history.undo_label() }
+    pub fn undo_label(&self) -> Option<&str> {
+        self.history.undo_label()
+    }
 
-    pub fn redo_label(&self) -> Option<&str> { self.history.redo_label() }
+    pub fn redo_label(&self) -> Option<&str> {
+        self.history.redo_label()
+    }
 
     pub fn append_level(&mut self, tile: &[Prefab]) -> Option<u32> {
         if self.read_only {
@@ -847,7 +919,9 @@ impl MapDocument {
         self.focus = None;
     }
 
-    pub fn save(&mut self) -> std::io::Result<()> { self.save_with(None) }
+    pub fn save(&mut self) -> std::io::Result<()> {
+        self.save_with(None)
+    }
 
     pub fn save_with(&mut self, sanitize: Option<&ObjectTree>) -> std::io::Result<()> {
         let Some(path) = self.path.clone() else {
@@ -1073,9 +1147,7 @@ mod tests {
         ]);
 
         for level in &mut map.grid {
-            for cell in &mut level[0] {
-                *cell = key;
-            }
+            level[0].fill(key);
         }
 
         map

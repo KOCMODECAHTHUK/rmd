@@ -24,7 +24,9 @@ impl ProfileConfig {
         kind: ProfileFieldKind::NullableText,
     };
 
-    pub(crate) fn modular_loader(&self) -> Option<&str> { self.modular_loader.as_deref() }
+    pub(crate) fn modular_loader(&self) -> Option<&str> {
+        self.modular_loader.as_deref()
+    }
 
     pub(crate) fn validate_declarations(tree: &ObjectTree, ty: TypeId) -> Result<(), Fault> {
         for field in Self::FIELDS {
@@ -160,7 +162,9 @@ impl ProfileDefinition {
         Self { ty, procedures }
     }
 
-    pub fn procedure(&self, hook: ProfileHook) -> Option<ProcId> { self.procedures[hook as usize] }
+    pub fn procedure(&self, hook: ProfileHook) -> Option<ProcId> {
+        self.procedures[hook as usize]
+    }
 
     pub fn hook_of(&self, proc: ProcId) -> Option<ProfileHook> {
         ProfileHook::ALL
@@ -306,7 +310,9 @@ fn pick_default(tree: &ObjectTree, profiles: &[TypeId], defaults: &[TypeId]) -> 
     }
 }
 
-pub fn default_type(tree: &ObjectTree) -> Result<TypeId, ProfileError> { Ok(catalog(tree)?.default) }
+pub fn default_type(tree: &ObjectTree) -> Result<TypeId, ProfileError> {
+    Ok(catalog(tree)?.default)
+}
 
 pub fn selected_type(tree: &ObjectTree, requested: Option<&TreePath>) -> Result<TypeId, ProfileError> {
     let catalog = catalog(tree)?;
@@ -314,4 +320,6 @@ pub fn selected_type(tree: &ObjectTree, requested: Option<&TreePath>) -> Result<
     Ok(catalog.select(tree, requested))
 }
 
-pub fn exists(tree: &ObjectTree) -> bool { default_type(tree).is_ok() }
+pub fn exists(tree: &ObjectTree) -> bool {
+    default_type(tree).is_ok()
+}
