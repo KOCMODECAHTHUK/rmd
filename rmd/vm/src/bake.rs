@@ -14,15 +14,7 @@ use codegen::Module;
 use objtree::{ObjectTree, TypeId};
 
 use crate::{
-    AppearanceDelta,
-    AppearanceLighting,
-    Diagnostics,
-    Fault,
-    FaultKind,
-    GenericValue,
-    IconStates,
-    Limits,
-    Runtime,
+    AppearanceDelta, AppearanceLighting, Diagnostics, Fault, FaultKind, GenericValue, IconStates, Limits, Runtime,
     heap::{Object, ObjectId},
     lighting::{LightSource, LightingAtom, direction_angle, parse_color},
     matrix,
@@ -31,14 +23,8 @@ use crate::{
 pub use crate::{
     lighting::{LightTile, LightingMap},
     profile::{
-        ProfileCatalog,
-        ProfileDefinition,
-        ProfileError,
-        ProfileHook,
-        catalog as profile_catalog,
-        default_in_file as profile_in_file,
-        default_type as profile_type,
-        exists as has_profile,
+        ProfileCatalog, ProfileDefinition, ProfileError, ProfileHook, catalog as profile_catalog,
+        default_in_file as profile_in_file, default_type as profile_type, exists as has_profile,
         selected_type as selected_profile_type,
     },
 };
@@ -155,7 +141,9 @@ pub struct Highlight {
 }
 
 impl Highlight {
-    pub fn shown_when(&self, when: u8) -> bool { self.when & when != 0 }
+    pub fn shown_when(&self, when: u8) -> bool {
+        self.when & when != 0
+    }
 }
 
 pub fn highlight_tiles(covered: &HashSet<[i32; 2]>) -> Vec<HighlightTile> {
@@ -229,7 +217,9 @@ fn shared(appearance: AppearanceDelta) -> SharedAppearance {
 struct Contributions(Vec<(u64, SharedAppearance)>);
 
 impl Contributions {
-    fn slot(&self, id: u64) -> Result<usize, usize> { self.0.binary_search_by_key(&id, |(current, _)| *current) }
+    fn slot(&self, id: u64) -> Result<usize, usize> {
+        self.0.binary_search_by_key(&id, |(current, _)| *current)
+    }
 
     fn insert(&mut self, id: u64, appearance: SharedAppearance) {
         match self.slot(id) {
@@ -255,7 +245,9 @@ impl Contributions {
         self.0.get(self.slot(id).ok()?).map(|(_, appearance)| appearance)
     }
 
-    fn iter(&self) -> impl Iterator<Item = &(u64, SharedAppearance)> { self.0.iter() }
+    fn iter(&self) -> impl Iterator<Item = &(u64, SharedAppearance)> {
+        self.0.iter()
+    }
 }
 
 #[derive(Debug)]
@@ -335,7 +327,9 @@ impl Bake {
         }
     }
 
-    pub fn rotations(&self) -> &[Rotation] { if self.initialized { &self.runtime.rotations } else { &[] } }
+    pub fn rotations(&self) -> &[Rotation] {
+        if self.initialized { &self.runtime.rotations } else { &[] }
+    }
 
     pub fn modular_loader(&self) -> Option<&str> {
         if self.initialized {
@@ -477,9 +471,13 @@ impl Bake {
         }
     }
 
-    pub fn position(&self, id: u64) -> Option<Position> { self.atoms.get(&id).map(|atom| atom.position) }
+    pub fn position(&self, id: u64) -> Option<Position> {
+        self.atoms.get(&id).map(|atom| atom.position)
+    }
 
-    pub fn object(&self, id: u64) -> Option<ObjectId> { self.objects.get(&id).copied() }
+    pub fn object(&self, id: u64) -> Option<ObjectId> {
+        self.objects.get(&id).copied()
+    }
 
     /// Placements connected to `id` through complementary profile-defined endpoint roles.
     pub fn connections(&self, id: u64) -> Vec<u64> {
@@ -506,7 +504,9 @@ impl Bake {
         connected
     }
 
-    pub fn highlights(&self, id: u64) -> &[Highlight] { self.highlights.get(&id).map_or(&[], Vec::as_slice) }
+    pub fn highlights(&self, id: u64) -> &[Highlight] {
+        self.highlights.get(&id).map_or(&[], Vec::as_slice)
+    }
 
     pub fn highlighted(&self) -> impl Iterator<Item = (u64, &[Highlight])> {
         self.highlights.iter().map(|(id, list)| (*id, list.as_slice()))
@@ -537,9 +537,13 @@ impl Bake {
         frame
     }
 
-    pub fn hook_of(&self, fault: &Fault) -> Option<ProfileHook> { self.profile.hook_of(fault.outermost_proc_id()?) }
+    pub fn hook_of(&self, fault: &Fault) -> Option<ProfileHook> {
+        self.profile.hook_of(fault.outermost_proc_id()?)
+    }
 
-    pub fn take_output(&mut self) -> Vec<String> { self.runtime.take_output() }
+    pub fn take_output(&mut self) -> Vec<String> {
+        self.runtime.take_output()
+    }
 
     fn sorted_ids(&self) -> Vec<u64> {
         let mut ids = self.atoms.keys().copied().collect::<Vec<_>>();
@@ -1383,7 +1387,9 @@ impl Bake {
     }
 }
 
-fn finite_or(value: f32, default: f32) -> f32 { if value.is_finite() { value } else { default } }
+fn finite_or(value: f32, default: f32) -> f32 {
+    if value.is_finite() { value } else { default }
+}
 
 fn world_icon_size(tree: &ObjectTree) -> f32 {
     let size = tree
@@ -1876,7 +1882,9 @@ struct Names {
     overlay_light: Identifier,
 }
 
-pub fn host_reads() -> Vec<Identifier> { HOST_READS.iter().map(|name| Identifier::from(*name)).collect() }
+pub fn host_reads() -> Vec<Identifier> {
+    HOST_READS.iter().map(|name| Identifier::from(*name)).collect()
+}
 
 const HOST_READS: &[&str] = &[
     vars::NAME,

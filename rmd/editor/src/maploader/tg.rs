@@ -11,8 +11,7 @@ use objtree::{ObjectTree, TypeId};
 use serde::Deserialize;
 
 use super::{
-    MAX_NESTING,
-    MapLoader,
+    MAX_NESTING, MapLoader,
     error::{Diagnostic, ErrorKind},
     resolved_path,
 };
@@ -48,7 +47,9 @@ impl MapLoader for TgMapLoader {
         }
     }
 
-    fn ignored_atom_paths() -> &'static [&'static str] { &IGNORED_ATOM_PATHS }
+    fn ignored_atom_paths() -> &'static [&'static str] {
+        &IGNORED_ATOM_PATHS
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -262,7 +263,9 @@ fn placements(map: &Map) -> impl Iterator<Item = (Coord, usize, &Prefab)> {
     })
 }
 
-fn dm_path(path: &str) -> PathBuf { PathBuf::from(path.replace('\\', "/")) }
+fn dm_path(path: &str) -> PathBuf {
+    PathBuf::from(path.replace('\\', "/"))
+}
 
 fn read(path: &Path) -> Result<String, ErrorKind> {
     fs::read_to_string(path).map_err(|error| ErrorKind::Read {
@@ -309,9 +312,13 @@ mod tests {
             fs::write(path, source).unwrap();
         }
 
-        fn map(&self, path: &str, map: &Map) { self.write(path, &dmm::writer::write(map)); }
+        fn map(&self, path: &str, map: &Map) {
+            self.write(path, &dmm::writer::write(map));
+        }
 
-        fn path(&self, path: &str) -> PathBuf { resolved_path(&self.directory.join(path)) }
+        fn path(&self, path: &str) -> PathBuf {
+            resolved_path(&self.directory.join(path))
+        }
 
         fn discover(&self, map: &Map) -> map_module::Discovery {
             discover(
@@ -325,7 +332,9 @@ mod tests {
     }
 
     impl Drop for Fixture {
-        fn drop(&mut self) { let _ = fs::remove_dir_all(&self.directory); }
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.directory);
+        }
     }
 
     fn analyze(entry: &Path) -> ObjectTree {
@@ -338,7 +347,9 @@ mod tests {
         tree
     }
 
-    fn prefab(path: &str) -> Prefab { Prefab::new(TreePath::parse(path)) }
+    fn prefab(path: &str) -> Prefab {
+        Prefab::new(TreePath::parse(path))
+    }
 
     fn root(key: &str) -> Prefab {
         let mut root = prefab("/obj/modular_map_root/fixture");
@@ -362,7 +373,9 @@ mod tests {
         map
     }
 
-    fn leaf() -> Map { map([1, 1, 1], &[(Coord::new(1, 1, 1), prefab(CONNECTOR_PATH))]) }
+    fn leaf() -> Map {
+        map([1, 1, 1], &[(Coord::new(1, 1, 1), prefab(CONNECTOR_PATH))])
+    }
 
     fn only_module(root: &map_module::Root) -> &map_module::MapModule {
         assert!(root.error.is_none(), "{:?}", root.error);

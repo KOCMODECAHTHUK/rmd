@@ -4,32 +4,17 @@ use dmm::{Coord, Prefab, PrefabInstanceId};
 pub use vm::{
     AppearanceDelta,
     bake::{
-        Bake,
-        HIGHLIGHT_ALWAYS,
-        HIGHLIGHT_EDGE_EAST,
-        HIGHLIGHT_EDGE_NORTH,
-        HIGHLIGHT_EDGE_SOUTH,
-        HIGHLIGHT_EDGE_WEST,
-        HIGHLIGHT_HOVERED,
-        HIGHLIGHT_SELECTED,
-        Highlight,
-        HighlightTile,
-        SharedAppearance,
-        highlight_tiles,
+        Bake, HIGHLIGHT_ALWAYS, HIGHLIGHT_EDGE_EAST, HIGHLIGHT_EDGE_NORTH, HIGHLIGHT_EDGE_SOUTH, HIGHLIGHT_EDGE_WEST,
+        HIGHLIGHT_HOVERED, HIGHLIGHT_SELECTED, Highlight, HighlightTile, SharedAppearance, highlight_tiles,
     },
     ui::{
-        Command as UiCommand,
-        Feedback as UiFeedback,
-        Frame as UiFrame,
-        PopupId as UiPopupId,
-        Rebake as UiRebake,
+        Command as UiCommand, Feedback as UiFeedback, Frame as UiFrame, PopupId as UiPopupId, Rebake as UiRebake,
         Value as UiValue,
     },
 };
 
 use crate::{
-    BakeProgram,
-    Environment,
+    BakeProgram, Environment,
     document::MapDocument,
     progress::{Progress, Stage},
 };
@@ -156,7 +141,9 @@ fn report(progress: &Progress, current: &mut Option<vm::bake::Stage>) -> impl Fn
     }
 }
 
-pub fn levels(bake: &Bake) -> u32 { u32::try_from(bake.runtime.world.size[2]).unwrap_or(0) }
+pub fn levels(bake: &Bake) -> u32 {
+    u32::try_from(bake.runtime.world.size[2]).unwrap_or(0)
+}
 
 // `atoms` are everything on the levels the bake doesn't have yet
 pub fn extend(
@@ -264,7 +251,9 @@ mod tests {
     use super::*;
     use crate::{command::Edit, frame, visual};
 
-    fn examples() -> PathBuf { PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/env") }
+    fn examples() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/env")
+    }
 
     fn environment(profile: &'static str) -> Environment {
         let root = examples();

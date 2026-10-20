@@ -346,15 +346,9 @@ pub(super) mod tests {
         command::Edit,
         document::{MapDocument, PrefabInstanceId},
         frame::{
-            FrameInstances,
-            FrameRenderOptions,
-            PrefabUpdate,
-            TypeVisibility,
-            build,
-            build_with_options,
+            FrameInstances, FrameRenderOptions, PrefabUpdate, TypeVisibility, build, build_with_options,
             tests::{assert_render_data_matches, document, icons, textures, tree},
-            update_prefab,
-            update_prefabs,
+            update_prefab, update_prefabs,
         },
     };
 

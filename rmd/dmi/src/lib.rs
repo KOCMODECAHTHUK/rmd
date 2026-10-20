@@ -129,7 +129,9 @@ impl IconFile {
         })
     }
 
-    pub fn load_metadata(path: impl AsRef<Path>) -> Result<Metadata, IconError> { Ok(Self::load_info(path)?.metadata) }
+    pub fn load_metadata(path: impl AsRef<Path>) -> Result<Metadata, IconError> {
+        Ok(Self::load_info(path)?.metadata)
+    }
 
     pub fn load_info(path: impl AsRef<Path>) -> Result<IconInfo, IconError> {
         let path = path.as_ref();
@@ -144,11 +146,15 @@ impl IconFile {
         })
     }
 
-    pub fn cell_count(&self) -> usize { cell_count(&self.metadata, self.sheet_width, self.sheet_height) }
+    pub fn cell_count(&self) -> usize {
+        cell_count(&self.metadata, self.sheet_width, self.sheet_height)
+    }
 }
 
 impl IconInfo {
-    pub fn cell_count(&self) -> usize { cell_count(&self.metadata, self.sheet_width, self.sheet_height) }
+    pub fn cell_count(&self) -> usize {
+        cell_count(&self.metadata, self.sheet_width, self.sheet_height)
+    }
 }
 
 fn cell_count(metadata: &Metadata, sheet_width: u32, sheet_height: u32) -> usize {

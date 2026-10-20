@@ -59,13 +59,21 @@ pub struct TextureData {
 }
 
 impl TextureData {
-    pub fn path(&self) -> &Path { &self.path }
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
 
-    pub fn width(&self) -> u32 { self.width }
+    pub fn width(&self) -> u32 {
+        self.width
+    }
 
-    pub fn height(&self) -> u32 { self.height }
+    pub fn height(&self) -> u32 {
+        self.height
+    }
 
-    pub fn builtin_pixels(&self) -> Option<&'static [u8]> { self.builtin_pixels }
+    pub fn builtin_pixels(&self) -> Option<&'static [u8]> {
+        self.builtin_pixels
+    }
 
     pub fn decoded_bytes(&self) -> usize {
         (self.width as usize)
@@ -83,19 +91,33 @@ pub struct TextureCatalog {
 }
 
 impl TextureCatalog {
-    pub fn new() -> Self { Self::default() }
+    pub fn new() -> Self {
+        Self::default()
+    }
 
-    pub fn len(&self) -> usize { self.textures.len() }
+    pub fn len(&self) -> usize {
+        self.textures.len()
+    }
 
-    pub fn is_empty(&self) -> bool { self.textures.is_empty() }
+    pub fn is_empty(&self) -> bool {
+        self.textures.is_empty()
+    }
 
-    pub fn textures(&self) -> &[TextureData] { &self.textures }
+    pub fn textures(&self) -> &[TextureData] {
+        &self.textures
+    }
 
-    pub fn texture(&self, index: u32) -> Option<&TextureData> { self.textures.get(usize::try_from(index).ok()?) }
+    pub fn texture(&self, index: u32) -> Option<&TextureData> {
+        self.textures.get(usize::try_from(index).ok()?)
+    }
 
-    pub fn missing_icon(&self) -> Option<SpriteTexture> { self.missing_icon }
+    pub fn missing_icon(&self) -> Option<SpriteTexture> {
+        self.missing_icon
+    }
 
-    pub fn is_missing_icon(&self, texture: SpriteTexture) -> bool { self.missing_icon == Some(texture) }
+    pub fn is_missing_icon(&self, texture: SpriteTexture) -> bool {
+        self.missing_icon == Some(texture)
+    }
 
     pub fn insert_missing_icon(&mut self) -> Result<SpriteTexture, TextureError> {
         if let Some(texture) = self.missing_icon {
@@ -121,7 +143,9 @@ impl TextureCatalog {
         Ok(texture)
     }
 
-    pub fn cell_count(&self) -> usize { self.cell_count }
+    pub fn cell_count(&self) -> usize {
+        self.cell_count
+    }
 
     pub fn decoded_bytes(&self) -> usize {
         self.textures

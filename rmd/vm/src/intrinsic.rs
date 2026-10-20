@@ -4,9 +4,7 @@ use std::{collections::HashSet, path::PathBuf};
 use defines::{EAST, NORTH, NORTHEAST, NORTHWEST, SOUTH, SOUTHEAST, SOUTHWEST, WEST};
 
 use crate::{
-    FaultKind,
-    GenericValue,
-    Intrinsic,
+    FaultKind, GenericValue, Intrinsic,
     bake::{NodeGroup, Rotation},
     builtins::index_arg,
     eval::Evaluator,
@@ -1715,7 +1713,9 @@ impl ViewGrid {
         is_inside.then(|| (y * self.width + x) as usize)
     }
 
-    fn get(&self, x: i32, y: i32) -> Option<ViewTile> { self.index(x, y).and_then(|index| self.tiles[index]) }
+    fn get(&self, x: i32, y: i32) -> Option<ViewTile> {
+        self.index(x, y).and_then(|index| self.tiles[index])
+    }
 
     fn get_mut(&mut self, x: i32, y: i32) -> Option<&mut ViewTile> {
         self.index(x, y).and_then(|index| self.tiles[index].as_mut())
