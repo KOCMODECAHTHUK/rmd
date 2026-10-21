@@ -355,7 +355,7 @@ impl Session {
         let changed = self
             .sync_module_source(id, affected)
             .unwrap_or_else(|| affected.to_vec());
-        self.settle_edited_modules(id, affected, changed);
+        self.bake_edits(id, affected, changed);
     }
 }
 

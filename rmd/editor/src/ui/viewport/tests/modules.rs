@@ -178,14 +178,14 @@ fn a_root_drag_leaves_the_bake_alone_until_release() -> TestResult {
     app.pointer(app.tile(2, 1), true);
     app.pointer(app.tile(5, 1), true);
 
-    assert!(app.session.is_module_bake_deferred());
+    assert!(app.session.is_module_bake_held());
     assert_eq!(app.session.module_roots()[0].coord, Coord::new(5, 1, 1));
     assert_eq!(app.session.baked_preview_positions(), before);
 
     app.pointer(app.tile(5, 1), false);
     app.key(Key::ModCtrl, false);
 
-    assert!(!app.session.is_module_bake_deferred());
+    assert!(!app.session.is_module_bake_held());
     let after = app.session.baked_preview_positions();
     assert_eq!(after.len(), before.len());
     assert_ne!(after, before);

@@ -107,8 +107,8 @@ impl Session {
         self.active_cache().revision
     }
 
-    pub(crate) fn is_module_bake_deferred(&self) -> bool {
-        matches!(self.active_cache().module_bake, super::ModuleBake::Deferred { .. })
+    pub(crate) fn is_module_bake_held(&self) -> bool {
+        matches!(self.active_cache().bake_hold, super::BakeHold::Modules { .. })
     }
 
     pub(crate) fn baked_preview_positions(&self) -> Vec<(u64, Option<vm::world::Position>)> {

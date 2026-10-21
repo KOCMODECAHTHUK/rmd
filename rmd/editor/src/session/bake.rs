@@ -1,12 +1,15 @@
+use std::{collections::HashSet, mem};
+
 use editor::{
-    bake::BakeUpdate,
-    document::DocumentId,
+    bake::{self, BakeUpdate},
+    document::{DocumentId, PrefabInstanceId},
     frame::{self, FrameRenderOptions, PrefabUpdate},
+    maploader::preview::PREVIEW_ID_START,
 };
 use render::FrameUpdate;
 use vm::profile::ProfileHook;
 
-use super::{ModuleBake, Session, always_highlighted};
+use super::{BakeHold, Session, always_highlighted};
 use crate::baker::{self, Baked, BakedMap, Job};
 
 // updates the renderer may not have drawn yet, so a frame that missed some can still catch up
@@ -133,7 +136,7 @@ impl Session {
         self.baker.invalidate(id);
         let cache = self.caches.entry(id).or_default();
         cache.bake = None;
-        cache.module_bake = ModuleBake::Live;
+        cache.bake_hold = BakeHold::Off;
         cache.unbaked.clear();
         cache.modules.reset();
         self.sync_module_guard(id);
@@ -317,7 +320,7 @@ impl Session {
     fn land_bake(&mut self, id: DocumentId, built: Option<BakedMap>) {
         let Self { state, caches, .. } = self;
         let cache = caches.entry(id).or_default();
-        cache.module_bake = ModuleBake::Live;
+        cache.bake_hold = BakeHold::Off;
         if let Some(BakedMap { mut bake, modules }) = built {
             report_bake_output(&mut bake);
             let is_enabled = cache.modules.enabled;
@@ -434,6 +437,107 @@ impl Session {
 
         self.publish_frame_update(id, update);
         self.revalidate_focus();
+    }
+
+    pub(super) fn bake_edits(&mut self, id: DocumentId, edited: &[PrefabInstanceId], changed: Vec<PrefabInstanceId>) {
+        let update = self.bake_update(id, edited, changed);
+        self.sync_module_guard(id);
+        self.apply_bake_update(id, update);
+    }
+
+    // `edited` are the document's own changes, the rest of `changed` only follows the composite
+    fn bake_update(
+        &mut self, id: DocumentId, edited: &[PrefabInstanceId], changed: Vec<PrefabInstanceId>,
+    ) -> BakeUpdate {
+        let Self {
+            state, caches, baker, ..
+        } = self;
+        let cache = caches.entry(id).or_default();
+        let (Some(bake), Some(environment), Some(document)) =
+            (cache.bake.as_mut(), state.environment.as_ref(), state.document(id))
+        else {
+            if baker.extending(id) {
+                cache.unbaked.extend_from_slice(&changed);
+            } else if !changed.is_empty() {
+                baker.invalidate(id);
+            }
+
+            return BakeUpdate {
+                appearances: changed,
+                lighting: None,
+            };
+        };
+
+        match &mut cache.bake_hold {
+            BakeHold::Off => {
+                let mut update =
+                    bake::update_known_levels(bake, environment, cache.modules.view(&document.map), &changed);
+                update.merge(bake::settle_modules(
+                    bake,
+                    environment,
+                    &document.map,
+                    document.path.as_deref(),
+                    &mut cache.modules,
+                ));
+                report_bake_output(bake);
+
+                update
+            },
+            BakeHold::Modules { pending } => {
+                let sources = edited
+                    .iter()
+                    .copied()
+                    .filter(|owner| owner.get() < PREVIEW_ID_START)
+                    .collect::<Vec<_>>();
+                pending.extend(changed.iter().copied().filter(|owner| !sources.contains(owner)));
+
+                let mut update =
+                    bake::update_known_levels(bake, environment, cache.modules.view(&document.map), &sources);
+                update.merge(BakeUpdate {
+                    appearances: changed,
+                    lighting: None,
+                });
+                report_bake_output(bake);
+
+                update
+            },
+            BakeHold::Everything { pending } => {
+                pending.extend(changed.iter().copied());
+
+                BakeUpdate {
+                    appearances: changed,
+                    lighting: None,
+                }
+            },
+        }
+    }
+
+    pub(crate) fn hold_bake(&mut self, id: DocumentId) {
+        let Some(cache) = self.caches.get_mut(&id) else {
+            return;
+        };
+
+        let pending = match mem::take(&mut cache.bake_hold) {
+            BakeHold::Off => HashSet::default(),
+            BakeHold::Modules { pending } | BakeHold::Everything { pending } => pending,
+        };
+        cache.bake_hold = BakeHold::Everything { pending };
+    }
+
+    pub(crate) fn release_bake(&mut self, id: DocumentId) {
+        let Some(cache) = self.caches.get_mut(&id) else {
+            return;
+        };
+
+        let BakeHold::Everything { pending } = &mut cache.bake_hold else {
+            return;
+        };
+
+        let mut pending = mem::take(pending).into_iter().collect::<Vec<_>>();
+        cache.bake_hold = BakeHold::Off;
+        pending.sort_unstable();
+
+        self.settle_modules(id, pending);
     }
 
     pub(super) fn publish_frame_update(&mut self, id: DocumentId, update: PrefabUpdate) {

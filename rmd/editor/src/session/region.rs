@@ -72,6 +72,7 @@ impl Session {
                 state,
             };
             self.pending_move = Some(pending);
+            self.hold_bake(document);
 
             pending
         };
@@ -176,35 +177,40 @@ impl Session {
     }
 
     pub fn finish_live_move(&mut self) {
-        self.pending_move = None;
+        if let Some(pending) = self.pending_move.take() {
+            self.release_bake(pending.document);
+        }
     }
 
     pub fn cancel_live_move(&mut self) {
         let pending = self.live_pending_move();
-        self.pending_move = None;
-        let Some(pending) = pending else {
+        let Some(document) = self.pending_move.take().map(|pending_move| pending_move.document) else {
             return;
         };
 
-        match pending.state {
-            PendingMoveState::Unmoved => {},
-            PendingMoveState::Moved { group, .. } => {
-                if let Some(retracted) = self
-                    .state
-                    .active_document_mut()
-                    .and_then(|document| document.retract_with_affected(group))
-                {
-                    self.settle_retracted(&retracted);
-                }
-            },
-            PendingMoveState::Floating => {
-                if let Some(floating) = self.live_floating_paste()
-                    && floating.target.bounds.min != pending.source.bounds.min
-                {
-                    self.repaste_floating(pending.source.bounds.min, floating.rotation);
-                }
-            },
+        if let Some(pending) = pending {
+            match pending.state {
+                PendingMoveState::Unmoved => {},
+                PendingMoveState::Moved { group, .. } => {
+                    if let Some(retracted) = self
+                        .state
+                        .active_document_mut()
+                        .and_then(|document| document.retract_with_affected(group))
+                    {
+                        self.settle_retracted(&retracted);
+                    }
+                },
+                PendingMoveState::Floating => {
+                    if let Some(floating) = self.live_floating_paste()
+                        && floating.target.bounds.min != pending.source.bounds.min
+                    {
+                        self.repaste_floating(pending.source.bounds.min, floating.rotation);
+                    }
+                },
+            }
         }
+
+        self.release_bake(document);
     }
 
     pub fn selection(&self) -> Option<Selection> {
@@ -529,9 +535,11 @@ mod tests {
         },
     };
 
+    use vm::world::Position;
+
     use crate::session::{
-        FillOutcome, RegionPreviewSource, Session,
-        fixtures::{assert_render_cache_matches_rebuild, flat_session, focus_session},
+        BakeHold, FillOutcome, RegionPreviewSource, Session,
+        fixtures::{assert_render_cache_matches_rebuild, examples, flat_session, focus_session, settle_bake},
     };
 
     #[test]
@@ -1109,5 +1117,97 @@ mod tests {
         assert_eq!(undo_depth(&session), depth);
         assert_eq!(session.redo_label(), None, "a cancelled move leaves nothing to redo");
         assert_render_cache_matches_rebuild(&session);
+    }
+
+    fn baked_table_on_the_example_map() -> (Session, PrefabInstanceId, Coord) {
+        let root = examples();
+        let mut session = Session::new();
+        session.load_environment(&root.join("test.dme")).expect("codebase");
+        session.open_map(&root.join("test.dmm"), 1).expect("map");
+        settle_bake(&mut session);
+        let source = Coord::new(3, 4, 1);
+        let table = session
+            .state
+            .active_document()
+            .and_then(|document| document.placed_tile(source))
+            .and_then(|tile| {
+                tile.iter()
+                    .find(|placed| placed.prefab().path == TreePath::parse("/obj/structure/table"))
+                    .map(|placed| placed.id())
+            })
+            .expect("the example map has a table");
+        session.set_tool(Tool::Select);
+        assert!(session.select_region(Some(Selection::from_drag(source, source))));
+
+        (session, table, source)
+    }
+
+    fn baked_position(session: &Session, id: PrefabInstanceId) -> Option<Position> {
+        session.active_cache().bake.as_ref()?.position(id.get())
+    }
+
+    fn position(coord: Coord) -> Option<Position> {
+        Some(Position::new(coord.x as i32, coord.y as i32, coord.z as i32))
+    }
+
+    fn is_bake_held(session: &Session) -> bool {
+        matches!(session.active_cache().bake_hold, BakeHold::Everything { .. })
+    }
+
+    #[test]
+    fn a_live_region_move_bakes_once_when_it_is_placed() {
+        let (mut session, table, source) = baked_table_on_the_example_map();
+        let target = Coord::new(2, 3, 1);
+        assert_eq!(baked_position(&session, table), position(source));
+
+        // the gizmo holds module settling every frame it is dragged
+        session.set_module_bake_held(true);
+        assert!(session.move_selected_region_live(Coord::new(3, 3, 1)));
+        session.set_module_bake_held(true);
+        assert!(session.move_selected_region_live(target));
+        session.set_module_bake_held(true);
+
+        assert!(is_bake_held(&session));
+        assert_eq!(
+            baked_position(&session, table),
+            position(source),
+            "the bake waits for the drop"
+        );
+        assert_render_cache_matches_rebuild(&session);
+
+        session.finish_live_move();
+        session.set_module_bake_held(false);
+
+        assert!(!is_bake_held(&session));
+        assert!(!session.is_module_bake_held());
+        assert_eq!(baked_position(&session, table), position(target));
+        assert_render_cache_matches_rebuild(&session);
+
+        assert!(session.move_selected_region_live(source));
+        assert_eq!(
+            baked_position(&session, table),
+            position(target),
+            "a later move holds the bake again"
+        );
+        session.finish_live_move();
+        assert_eq!(baked_position(&session, table), position(source));
+    }
+
+    #[test]
+    fn a_cancelled_live_region_move_bakes_the_restored_map() {
+        let (mut session, table, source) = baked_table_on_the_example_map();
+        let before = session.map().unwrap().clone();
+
+        assert!(session.move_selected_region_live(Coord::new(3, 3, 1)));
+        assert!(session.move_selected_region_live(Coord::new(2, 3, 1)));
+        session.cancel_live_move();
+
+        assert!(!is_bake_held(&session));
+        assert_eq!(*session.map().unwrap(), before);
+        assert_eq!(baked_position(&session, table), position(source));
+        assert_render_cache_matches_rebuild(&session);
+
+        session.cancel_live_move();
+        assert!(!is_bake_held(&session), "an idle cancel leaves the bake alone");
     }
 }

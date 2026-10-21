@@ -27,7 +27,7 @@ use editor::{
 use crate::{
     loader::load_codebase,
     session::{
-        ModuleBake, Session, build_textures,
+        BakeHold, Session, build_textures,
         fixtures::{assert_render_cache_matches_rebuild, node_environment_with_profile, settle_bake},
     },
 };
@@ -261,8 +261,8 @@ fn baked_position(session: &Session, id: PrefabInstanceId) -> Option<vm::world::
     session.active_cache().bake.as_ref()?.position(id.get())
 }
 
-fn is_deferred(session: &Session) -> bool {
-    matches!(session.active_cache().module_bake, ModuleBake::Deferred { .. })
+fn is_held(session: &Session) -> bool {
+    matches!(session.active_cache().bake_hold, BakeHold::Modules { .. })
 }
 
 pub(in crate::session) fn assert_settled(session: &Session) {
@@ -822,8 +822,8 @@ fn a_deferred_move_shows_the_module_without_baking_it_until_flushed() -> TestRes
         .collect::<Vec<_>>();
     session.pick_instance(Some(root));
 
-    session.set_module_bake_deferred(true);
-    assert!(is_deferred(&session));
+    session.set_module_bake_held(true);
+    assert!(is_held(&session));
 
     assert_eq!(session.move_picked_instance(coord(3), "move", &[], None), Some(true));
     assert!(has(&session, 3, ROOT));
@@ -856,9 +856,9 @@ fn a_deferred_move_shows_the_module_without_baking_it_until_flushed() -> TestRes
             .is_dirty()
     );
 
-    session.set_module_bake_deferred(false);
+    session.set_module_bake_held(false);
 
-    assert!(!is_deferred(&session));
+    assert!(!is_held(&session));
     assert!(
         previews
             .iter()
@@ -868,7 +868,7 @@ fn a_deferred_move_shows_the_module_without_baking_it_until_flushed() -> TestRes
     assert!(preview_ids(&session).iter().all(|id| is_baked(&session, *id)));
     assert_settled(&session);
 
-    session.set_module_bake_deferred(false);
+    session.set_module_bake_held(false);
     assert_settled(&session);
 
     Ok(())
@@ -880,19 +880,19 @@ fn a_variant_switch_while_deferred_settles_on_flush() -> TestResult {
     let mut session = fixture.session()?;
     let key = session.module_roots()[0].key.clone();
 
-    session.set_module_bake_deferred(true);
+    session.set_module_bake_held(true);
     session.choose_module_variant(&key, 1);
     assert!(has(&session, 2, MODULE));
     assert!(!has(&session, 2, WALL));
 
-    session.set_module_bake_deferred(false);
+    session.set_module_bake_held(false);
 
     assert!(preview_ids(&session).iter().all(|id| is_baked(&session, *id)));
     assert_settled(&session);
 
-    session.set_module_bake_deferred(true);
+    session.set_module_bake_held(true);
     session.choose_module_variant(&key, 0);
-    session.set_module_bake_deferred(false);
+    session.set_module_bake_held(false);
 
     assert!(has(&session, 3, WALL));
     assert_eq!(session.module_roots().len(), 2);
@@ -908,14 +908,14 @@ fn a_rebake_while_deferred_drops_the_pending_ids() -> TestResult {
     let mut session = fixture.session()?;
     let root = root_at(&session, 2);
     session.pick_instance(Some(root));
-    session.set_module_bake_deferred(true);
+    session.set_module_bake_held(true);
     assert_eq!(session.move_picked_instance(coord(3), "move", &[], None), Some(true));
 
     let id = session.state.active().ok_or("no active document")?;
     session.rebake(id);
     settle_bake(&mut session);
 
-    assert!(!is_deferred(&session));
+    assert!(!is_held(&session));
     assert!(has(&session, 3, WALL));
     assert!(preview_ids(&session).iter().all(|id| is_baked(&session, *id)));
     assert_settled(&session);
@@ -1343,7 +1343,7 @@ fn tramstation_root_move_timing() -> TestResult {
         session.move_picked_instance(coord, "move", &[], None);
         let returned = started.elapsed();
 
-        session.set_module_bake_deferred(true);
+        session.set_module_bake_held(true);
         let started = Instant::now();
         session.move_picked_instance(next, "move", &[], None);
         let deferred_moved = started.elapsed();
@@ -1351,7 +1351,7 @@ fn tramstation_root_move_timing() -> TestResult {
         session.move_picked_instance(coord, "move", &[], None);
         let deferred_returned = started.elapsed();
         let started = Instant::now();
-        session.set_module_bake_deferred(false);
+        session.set_module_bake_held(false);
         let flushed = started.elapsed();
 
         eprintln!(

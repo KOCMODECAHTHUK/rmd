@@ -2,7 +2,6 @@ use std::{collections::HashSet, mem, path::Path, sync::Arc};
 
 use dmm::Prefab;
 use editor::{
-    bake::{self, BakeUpdate},
     document::{DocumentId, MapDocument, PrefabInstanceId},
     maploader::{
         LoadedModule, OpenModule,
@@ -11,7 +10,7 @@ use editor::{
     visual,
 };
 
-use super::{ModuleBake, PlacementPreview, Session, bake::report_bake_output, prefab_thumbnail_or_missing};
+use super::{BakeHold, PlacementPreview, Session, prefab_thumbnail_or_missing};
 
 #[cfg(test)]
 pub(super) mod tests;
@@ -88,93 +87,32 @@ impl Session {
     }
 
     pub(super) fn settle_modules(&mut self, id: DocumentId, changed: Vec<PrefabInstanceId>) {
-        self.settle_edited_modules(id, &[], changed);
-    }
-
-    // `edited` are the document's own changes, the rest of `changed` only follows the composite
-    pub(super) fn settle_edited_modules(
-        &mut self, id: DocumentId, edited: &[PrefabInstanceId], changed: Vec<PrefabInstanceId>,
-    ) {
-        let Self {
-            state, caches, baker, ..
-        } = self;
-        let cache = caches.entry(id).or_default();
-        let update = match (cache.bake.as_mut(), state.environment.as_ref(), state.document(id)) {
-            (Some(bake), Some(environment), Some(document))
-                if let ModuleBake::Deferred { pending } = &mut cache.module_bake =>
-            {
-                let sources = edited
-                    .iter()
-                    .copied()
-                    .filter(|owner| owner.get() < PREVIEW_ID_START)
-                    .collect::<Vec<_>>();
-                pending.extend(changed.iter().copied().filter(|owner| !sources.contains(owner)));
-
-                let mut update =
-                    bake::update_known_levels(bake, environment, cache.modules.view(&document.map), &sources);
-                update.merge(BakeUpdate {
-                    appearances: changed,
-                    lighting: None,
-                });
-                report_bake_output(bake);
-
-                update
-            },
-            (Some(bake), Some(environment), Some(document)) => {
-                let mut update =
-                    bake::update_known_levels(bake, environment, cache.modules.view(&document.map), &changed);
-                update.merge(bake::settle_modules(
-                    bake,
-                    environment,
-                    &document.map,
-                    document.path.as_deref(),
-                    &mut cache.modules,
-                ));
-                report_bake_output(bake);
-
-                update
-            },
-            _ => {
-                if baker.extending(id) {
-                    cache.unbaked.extend_from_slice(&changed);
-                } else if !changed.is_empty() {
-                    baker.invalidate(id);
-                }
-
-                BakeUpdate {
-                    appearances: changed,
-                    lighting: None,
-                }
-            },
-        };
-
-        self.sync_module_guard(id);
-        self.apply_bake_update(id, update);
+        self.bake_edits(id, &[], changed);
     }
 }
 
 impl Session {
-    pub fn set_module_bake_deferred(&mut self, is_deferred: bool) {
+    pub fn set_module_bake_held(&mut self, is_held: bool) {
         let Some(id) = self.state.active() else {
             return;
         };
 
-        self.set_document_module_bake_deferred(id, is_deferred);
+        self.set_document_module_bake_held(id, is_held);
     }
 
-    pub(super) fn set_document_module_bake_deferred(&mut self, id: DocumentId, is_deferred: bool) {
+    pub(super) fn set_document_module_bake_held(&mut self, id: DocumentId, is_held: bool) {
         let Some(cache) = self.caches.get_mut(&id) else {
             return;
         };
 
-        match (&cache.module_bake, is_deferred) {
-            (ModuleBake::Live, true) => {
-                cache.module_bake = ModuleBake::Deferred {
+        match (&cache.bake_hold, is_held) {
+            (BakeHold::Off, true) => {
+                cache.bake_hold = BakeHold::Modules {
                     pending: HashSet::new(),
                 };
             },
-            (ModuleBake::Deferred { .. }, false) => {
-                let ModuleBake::Deferred { pending } = mem::take(&mut cache.module_bake) else {
+            (BakeHold::Modules { .. }, false) => {
+                let BakeHold::Modules { pending } = mem::take(&mut cache.bake_hold) else {
                     return;
                 };
                 let mut pending = pending.into_iter().collect::<Vec<_>>();

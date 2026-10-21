@@ -70,12 +70,14 @@ pub(crate) use self::{
 };
 
 #[derive(Default)]
-enum ModuleBake {
+enum BakeHold {
+    /// Every edit bakes RIGHT NOW
     #[default]
-    Live,
-    Deferred {
-        pending: HashSet<PrefabInstanceId>,
-    },
+    Off,
+    /// Edits bake, module settling waits (this happens when we move maproots/modules through gizmo)
+    Modules { pending: HashSet<PrefabInstanceId> },
+    /// Nothing bakes until it's released (this happens when we move selection region)
+    Everything { pending: HashSet<PrefabInstanceId> },
 }
 
 #[derive(Default)]
@@ -89,7 +91,7 @@ struct DocumentCache {
     lighting_updates: Vec<render::LightingUpdate>,
     preview: Option<RegionPreviewCache>,
     bake: Option<editor::bake::Bake>,
-    module_bake: ModuleBake,
+    bake_hold: BakeHold,
     // edited while the bake was off growing by a level, replayed when it comes back
     unbaked: Vec<PrefabInstanceId>,
     always_highlights: Vec<PrefabInstanceId>,

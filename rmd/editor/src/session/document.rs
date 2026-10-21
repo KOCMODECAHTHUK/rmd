@@ -106,7 +106,7 @@ impl Session {
         if self.state.active() != Some(id) {
             self.cancel_node_edit();
             if let Some(previous) = self.state.active() {
-                self.set_document_module_bake_deferred(previous, false);
+                self.set_document_module_bake_held(previous, false);
             }
 
             self.state.set_active(id);

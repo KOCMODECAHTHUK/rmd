@@ -589,7 +589,7 @@ impl UiState {
             hovered: frame.is_hovered && !capture.is_any() && !ui.io().want_text_input(),
         };
         let is_gizmo_capturing = self.draw_tool_gizmo(ui, session, settings, frame, tool, gizmo_view);
-        session.set_module_bake_deferred(self.gizmo.is_interacting());
+        session.set_module_bake_held(self.gizmo.is_interacting());
 
         if tool == Tool::Select
             && gizmo_view.hovered
