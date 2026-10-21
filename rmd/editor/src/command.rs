@@ -67,6 +67,7 @@ impl LevelEdit {
     }
 }
 
+/// IMPORTANT: An Edit is a list of tile snapshots, not operations!!!
 #[derive(Debug, Clone)]
 pub struct Edit {
     pub label: String,
@@ -222,6 +223,9 @@ impl History {
                 self.saved_at = None;
             }
 
+            // we only keep changes that differ (before != after), if a stoke undid itself (ie dragging on)
+            // then dragging back over a tile and restoring what was there, the merged entry has no changes
+            // left, so we pop it
             merge_changes(&mut previous.edit.changes, edit.changes);
 
             if previous.edit.changes.is_empty() {

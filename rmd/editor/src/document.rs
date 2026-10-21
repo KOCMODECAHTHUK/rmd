@@ -117,6 +117,27 @@ impl Journal {
     }
 }
 
+enum StepKind {
+    Undo,
+    Redo,
+}
+
+impl StepKind {
+    fn next_step<'a>(&self, history: &'a History) -> Option<&'a Edit> {
+        match self {
+            StepKind::Undo => history.next_undo(),
+            StepKind::Redo => history.next_redo(),
+        }
+    }
+
+    fn step<'a>(&self, history: &'a mut History, grid: &mut Grid) -> Option<&'a Edit> {
+        match self {
+            StepKind::Undo => history.undo(grid),
+            StepKind::Redo => history.redo(grid),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PrefabLocation {
     pub coord: Coord,
@@ -699,21 +720,17 @@ impl MapDocument {
         true
     }
 
-    pub fn undo(&mut self) -> bool {
-        self.undo_with_affected().is_some()
-    }
-
-    pub fn undo_with_affected(&mut self) -> Option<Vec<PrefabInstanceId>> {
+    fn step_history(&mut self, step_kind: StepKind) -> Option<Vec<PrefabInstanceId>> {
         if self.read_only {
             return None;
         }
 
-        let replaced = self
-            .history
-            .next_undo()
+        let replaced = step_kind
+            .next_step(&self.history)
             .map(|edit| self.current_ids(edit))
             .unwrap_or_default();
-        let edit = self.history.undo(&mut self.map);
+
+        let edit = step_kind.step(&mut self.history, &mut self.map);
         if let (Some(edit), Some(journal)) = (edit, self.journal.as_mut()) {
             journal.record(edit);
         }
@@ -726,14 +743,25 @@ impl MapDocument {
             self.level_changed(z);
         }
 
-        if let Some(SelectionChange { before, .. }) = selection {
-            self.restore_selection(before);
+        if let Some(SelectionChange { before, after }) = selection {
+            match step_kind {
+                StepKind::Undo => self.restore_selection(before),
+                StepKind::Redo => self.restore_selection(after),
+            };
         }
 
         self.generation += 1;
         self.clear_stale_instance_selection();
 
         affected
+    }
+
+    pub fn undo(&mut self) -> bool {
+        self.undo_with_affected().is_some()
+    }
+
+    pub fn undo_with_affected(&mut self) -> Option<Vec<PrefabInstanceId>> {
+        self.step_history(StepKind::Undo)
     }
 
     pub fn redo(&mut self) -> bool {
@@ -741,36 +769,7 @@ impl MapDocument {
     }
 
     pub fn redo_with_affected(&mut self) -> Option<Vec<PrefabInstanceId>> {
-        if self.read_only {
-            return None;
-        }
-
-        let replaced = self
-            .history
-            .next_redo()
-            .map(|edit| self.current_ids(edit))
-            .unwrap_or_default();
-        let edit = self.history.redo(&mut self.map);
-        if let (Some(edit), Some(journal)) = (edit, self.journal.as_mut()) {
-            journal.record(edit);
-        }
-
-        let edit = edit?;
-        let level = edit.level().map(LevelEdit::z);
-        let selection = edit.selection();
-        let affected = Some(with_replaced(edit, replaced));
-        if let Some(z) = level {
-            self.level_changed(z);
-        }
-
-        if let Some(SelectionChange { after, .. }) = selection {
-            self.restore_selection(after);
-        }
-
-        self.generation += 1;
-        self.clear_stale_instance_selection();
-
-        affected
+        self.step_history(StepKind::Redo)
     }
 
     // edits made elsewhere can leave atoms on these tiles that the history entry never saw
