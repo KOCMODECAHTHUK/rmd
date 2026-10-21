@@ -45,6 +45,10 @@ impl Session {
         if self.state.tool == Tool::Node && tool != Tool::Node {
             self.cancel_node_edit();
         }
+
+        if self.state.tool == Tool::BlockSelect && tool != Tool::BlockSelect {
+            self.cancel_live_move();
+        }
         self.state.tool = tool;
         if tool == Tool::BlockSelect
             && let Some(document) = self.state.active_document_mut()

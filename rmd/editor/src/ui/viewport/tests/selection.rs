@@ -159,7 +159,7 @@ fn rectangle_ui_clears_on_a_click_outside_and_selects_one_tile_without_a_selecti
 }
 
 #[test]
-fn rectangle_ui_moves_on_release_copies_with_ctrl_and_cancels_with_escape() {
+fn rectangle_ui_moves_while_dragging_copies_with_ctrl_and_cancels_with_escape() {
     let _guard = IMGUI_CONTEXT.lock().unwrap();
     let mut app = RectangleUiHarness::new();
     app.session
@@ -188,11 +188,16 @@ fn rectangle_ui_moves_on_release_copies_with_ctrl_and_cancels_with_escape() {
     let center = center_of(&app, source);
     let before = app.session.map().unwrap().clone();
 
-    // escape mid-move drops the drag without an edit
+    // escape mid-move puts the block back without an edit
     app.pointer(center, false);
     app.pointer(center, true);
     app.pointer([center[0] + 64.0, center[1]], true);
     assert!(app.view.gestures.block_placement.is_some());
+    assert_eq!(
+        tables(&app),
+        [Coord::new(7, 8, 1)],
+        "the source clears as soon as the block moves"
+    );
     app.key(Key::Escape, true);
     app.key(Key::Escape, false);
     app.pointer([center[0] + 64.0, center[1]], false);
@@ -534,23 +539,6 @@ fn rectangle_ui_moves_and_cuts_on_a_created_level() {
             Some(Selection::from_drag(Coord::new(7, 8, z), Coord::new(8, 9, z))),
             "created: {created}"
         );
-        assert!(
-            app.session
-                .map_view_frame(
-                    app.id,
-                    Default::default(),
-                    Default::default(),
-                    Default::default(),
-                    &[],
-                    &[]
-                )
-                .and_then(|frame| frame.preview)
-                .is_some_and(|preview| !preview.sprites.is_empty()),
-            "created: {created}"
-        );
-
-        app.pointer([center[0] + 64.0, center[1]], false);
-        assert!(app.view.gestures.block_placement.is_none());
         let location = |app: &RectangleUiHarness| {
             app.session
                 .state
@@ -559,6 +547,10 @@ fn rectangle_ui_moves_and_cuts_on_a_created_level() {
                 .instance_location(table)
                 .map(|location| location.coord)
         };
+        assert_eq!(location(&app), Some(Coord::new(7, 8, z)), "created: {created}");
+
+        app.pointer([center[0] + 64.0, center[1]], false);
+        assert!(app.view.gestures.block_placement.is_none());
         assert_eq!(location(&app), Some(Coord::new(7, 8, z)), "created: {created}");
 
         ctrl_key(&mut app, Key::X);

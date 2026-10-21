@@ -2,8 +2,7 @@ use dear_imgui_rs::{DragFlags, DrawListMut, Ui};
 use dmm::{Coord, Size};
 use editor::{
     document::{DocumentId, Selection},
-    icons::materialdesignicons::ICON_CIRCLE_SMALL,
-    tool::{BlockSelectionMode, SelectionMask},
+    tool::{BlockSelectionMode, SelectionMask, SelectionPlacement},
 };
 
 use super::{OVERLAY_BG, OverlayRect, common::dpi};
@@ -66,6 +65,7 @@ impl BlockSelectionOptions {
 pub(super) struct PendingBlockPlacement {
     pub(super) source: Selection,
     pub(super) target: Selection,
+    pub(super) placement: SelectionPlacement,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -196,7 +196,7 @@ pub(super) fn draw_block_outline(
             BlockSelectionMode::Hollow { line_width } => format!("Border {line_width}"),
         };
         let label = format!(
-            "{} x {} {ICON_CIRCLE_SMALL} {mode_label}",
+            "{mode_label}: {} x {}",
             displayed.width(),
             displayed.height()
         );

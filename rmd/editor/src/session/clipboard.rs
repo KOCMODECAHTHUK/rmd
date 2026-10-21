@@ -642,6 +642,44 @@ mod tests {
     }
 
     #[test]
+    fn a_fresh_paste_moved_live_stays_one_paste_and_cancels_back_to_where_it_landed() {
+        let wall = Coord::new(4, 1, 1);
+        let mut session = wall_under_a_paste(6, 1, wall);
+        assert!(session.copy_tile(Coord::new(1, 1, 1)));
+        let covered = session.state.active_document().unwrap().placed_tile(wall).unwrap();
+        let before_paste = session.map().unwrap().clone();
+        let landed = Some(Selection::from_drag(wall, wall));
+
+        assert!(session.paste_clipboard(wall, SelectionRotation::Original));
+        assert!(session.move_selected_block_live(Coord::new(6, 1, 1)));
+        assert_eq!(
+            session.state.active_document().unwrap().placed_tile(wall).unwrap(),
+            covered
+        );
+        session.cancel_live_move();
+        assert_eq!(session.selection(), landed);
+
+        assert!(session.move_selected_block_live(Coord::new(5, 1, 1)));
+        assert!(session.move_selected_block_live(Coord::new(6, 1, 1)));
+        session.finish_live_move();
+
+        assert_eq!(
+            session.state.active_document().unwrap().placed_tile(wall).unwrap(),
+            covered,
+            "the wall keeps its ids"
+        );
+        assert_eq!(
+            paths_at(&session, Coord::new(6, 1, 1)),
+            ["/obj/structure/table", "/turf/open/floor", "/area/station"]
+        );
+        assert_eq!(session.undo_label(), Some("paste block"));
+        assert_render_cache_matches_rebuild(&session);
+
+        assert!(session.undo());
+        assert_eq!(*session.map().unwrap(), before_paste, "one undo takes the paste back");
+    }
+
+    #[test]
     fn rotating_a_fresh_non_square_paste_puts_back_what_it_covered() {
         let wall = Coord::new(3, 2, 1);
         let mut session = wall_under_a_paste(3, 3, wall);

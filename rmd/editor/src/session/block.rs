@@ -1,6 +1,7 @@
 use dmm::Coord;
 use editor::{
-    document::Selection,
+    command::EditGroupId,
+    document::{DocumentId, Selection},
     tool::{
         BlockSelectionMode, SelectionMask, SelectionPlacement, SelectionRotation, SelectionTransform, Tool,
         fill_selection as build_selection_fill, is_placeable, place_selection_with_mode as build_selection_placement,
@@ -10,7 +11,175 @@ use editor::{
 
 use super::Session;
 
+#[derive(Debug, Clone, Copy)]
+pub(super) struct PendingMove {
+    document: DocumentId,
+    source: SelectionMask,
+    state: PendingMoveState,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum PendingMoveState {
+    Unmoved,
+    Moved { group: EditGroupId, target: SelectionMask },
+    // a fresh paste follows by pasting again, which puts back what it covered
+    Floating,
+}
+
 impl Session {
+    fn live_pending_move(&self) -> Option<PendingMove> {
+        let pending = self.pending_move?;
+        let document = self.state.active_document()?;
+        if document.id() != pending.document {
+            return None;
+        }
+
+        let is_live = match pending.state {
+            PendingMoveState::Unmoved => self.selection_mask() == Some(pending.source),
+            PendingMoveState::Moved { group, target } => {
+                document.history.undo_group() == Some(group) && self.selection_mask() == Some(target)
+            },
+            PendingMoveState::Floating => self.live_floating_paste().is_some(),
+        };
+
+        is_live.then_some(pending)
+    }
+
+    pub(crate) fn pending_move_source(&self) -> Option<Selection> {
+        self.live_pending_move().map(|pending| pending.source.bounds)
+    }
+
+    pub fn move_selected_block_live(&mut self, target_min: Coord) -> bool {
+        let pending = if self.pending_move.is_some() {
+            let Some(pending) = self.live_pending_move() else {
+                return false;
+            };
+
+            pending
+        } else {
+            let (Some(document), Some(source)) = (self.state.active(), self.selection_mask()) else {
+                return false;
+            };
+
+            let state = if self.live_floating_paste().is_some() {
+                PendingMoveState::Floating
+            } else {
+                PendingMoveState::Unmoved
+            };
+            let pending = PendingMove {
+                document,
+                source,
+                state,
+            };
+            self.pending_move = Some(pending);
+
+            pending
+        };
+
+        if self.selection().is_some_and(|selection| selection.min == target_min) {
+            return true;
+        }
+
+        match pending.state {
+            PendingMoveState::Unmoved => self.commit_pending_move(pending, target_min),
+            PendingMoveState::Moved { .. } => {
+                // moving from the untouched map puts back whatever the block passed over
+                if !self.undo() {
+                    return false;
+                }
+
+                if target_min == pending.source.bounds.min {
+                    self.pending_move = Some(PendingMove {
+                        state: PendingMoveState::Unmoved,
+                        ..pending
+                    });
+
+                    return true;
+                }
+
+                if self.commit_pending_move(pending, target_min) {
+                    return true;
+                }
+
+                self.redo();
+
+                false
+            },
+            PendingMoveState::Floating => {
+                let Some(rotation) = self.live_floating_paste().map(|floating| floating.rotation) else {
+                    return false;
+                };
+
+                self.can_place_selected_block_with_mode(
+                    target_min,
+                    SelectionRotation::Original,
+                    SelectionPlacement::Move,
+                    pending.source.mode,
+                ) && self.repaste_floating(target_min, rotation)
+            },
+        }
+    }
+
+    fn commit_pending_move(&mut self, pending: PendingMove, target_min: Coord) -> bool {
+        let mode = pending.source.mode;
+        if !self.can_place_selected_block_with_mode(
+            target_min,
+            SelectionRotation::Original,
+            SelectionPlacement::Move,
+            mode,
+        ) {
+            return false;
+        }
+
+        let group = EditGroupId::new();
+        if !self.commit_block_placement(
+            target_min,
+            SelectionRotation::Original,
+            SelectionPlacement::Move,
+            mode,
+            Some(group),
+        ) {
+            return false;
+        }
+
+        let Some(target) = self.selection_mask() else {
+            return false;
+        };
+
+        self.pending_move = Some(PendingMove {
+            state: PendingMoveState::Moved { group, target },
+            ..pending
+        });
+
+        true
+    }
+
+    pub fn finish_live_move(&mut self) {
+        self.pending_move = None;
+    }
+
+    pub fn cancel_live_move(&mut self) {
+        let pending = self.live_pending_move();
+        self.pending_move = None;
+        let Some(pending) = pending else {
+            return;
+        };
+
+        match pending.state {
+            PendingMoveState::Unmoved => {},
+            PendingMoveState::Moved { .. } => {
+                self.undo();
+            },
+            PendingMoveState::Floating => {
+                if let Some(floating) = self.live_floating_paste()
+                    && floating.target.bounds.min != pending.source.bounds.min
+                {
+                    self.repaste_floating(pending.source.bounds.min, floating.rotation);
+                }
+            },
+        }
+    }
+
     pub fn selection(&self) -> Option<Selection> {
         self.selection_mask().map(|mask| mask.bounds)
     }
@@ -85,6 +254,13 @@ impl Session {
             return self.repaste_floating(target_min, floating.rotation);
         }
 
+        self.commit_block_placement(target_min, rotation, placement, selection_mode, None)
+    }
+
+    fn commit_block_placement(
+        &mut self, target_min: Coord, rotation: SelectionRotation, placement: SelectionPlacement,
+        selection_mode: BlockSelectionMode, group: Option<EditGroupId>,
+    ) -> bool {
         let hidden = self.hidden_types();
         let built = {
             let Some((environment, document)) = self.state.active_pair_mut() else {
@@ -116,7 +292,7 @@ impl Session {
                 bounds: selection,
                 mode: selection_mode,
             },
-            None,
+            group,
         )
     }
 
@@ -777,6 +953,96 @@ mod tests {
         assert!(session.cut_selection());
         assert_eq!(location(&session), None);
         assert!(session.clipboard().is_some());
+        assert_render_cache_matches_rebuild(&session);
+    }
+
+    fn table_beside_a_wall(wall: Coord) -> (Session, PrefabInstanceId) {
+        let mut session = flat_session(6, 1);
+        session
+            .state
+            .choose_prefab(Prefab::new(TreePath::parse("/turf/closed/wall")));
+        session.set_tool(Tool::Place);
+        assert!(session.place_at(wall, None).is_some());
+        session
+            .state
+            .choose_prefab(Prefab::new(TreePath::parse("/obj/structure/table")));
+        let table = session.place_at(Coord::new(1, 1, 1), None).unwrap();
+        session.set_tool(Tool::BlockSelect);
+        assert!(session.select_block(Some(Selection::from_drag(Coord::new(1, 1, 1), Coord::new(1, 1, 1)))));
+
+        (session, table)
+    }
+
+    fn undo_depth(session: &Session) -> usize {
+        session.state.active_document().unwrap().history.undo_depth()
+    }
+
+    #[test]
+    fn a_live_block_move_clears_the_source_at_once_and_puts_back_what_it_passes_over() {
+        let wall = Coord::new(3, 1, 1);
+        let (mut session, table) = table_beside_a_wall(wall);
+        let before = session.map().unwrap().clone();
+        let covered = session.state.active_document().unwrap().placed_tile(wall).unwrap();
+        let depth = undo_depth(&session);
+        let location = |session: &Session| {
+            session
+                .state
+                .active_document()
+                .unwrap()
+                .instance_location(table)
+                .map(|location| location.coord)
+        };
+
+        assert!(session.move_selected_block_live(Coord::new(2, 1, 1)));
+        assert_eq!(location(&session), Some(Coord::new(2, 1, 1)));
+        assert!(session.move_selected_block_live(wall));
+        assert_eq!(location(&session), Some(wall));
+        assert!(session.move_selected_block_live(Coord::new(5, 1, 1)));
+        session.finish_live_move();
+
+        let document = session.state.active_document().unwrap();
+        assert_eq!(location(&session), Some(Coord::new(5, 1, 1)));
+        assert_eq!(document.placed_tile(wall).unwrap(), covered, "the wall keeps its ids");
+        assert_eq!(
+            session.selection(),
+            Some(Selection::from_drag(Coord::new(5, 1, 1), Coord::new(5, 1, 1)))
+        );
+        assert_eq!(undo_depth(&session), depth + 1);
+        assert_eq!(session.undo_label(), Some("move block"));
+        assert_render_cache_matches_rebuild(&session);
+
+        assert!(session.undo());
+        assert_eq!(*session.map().unwrap(), before);
+        assert_eq!(location(&session), Some(Coord::new(1, 1, 1)));
+        assert!(session.redo());
+        assert_eq!(location(&session), Some(Coord::new(5, 1, 1)));
+    }
+
+    #[test]
+    fn a_live_block_move_back_to_its_start_or_cancelled_leaves_no_edit() {
+        let (mut session, _) = table_beside_a_wall(Coord::new(3, 1, 1));
+        let source = session.selection();
+        let before = session.map().unwrap().clone();
+        let depth = undo_depth(&session);
+
+        assert!(session.move_selected_block_live(Coord::new(4, 1, 1)));
+        assert!(session.move_selected_block_live(Coord::new(1, 1, 1)));
+        assert_eq!(*session.map().unwrap(), before);
+        assert_eq!(undo_depth(&session), depth);
+        assert!(session.move_selected_block_live(Coord::new(4, 1, 1)));
+        assert!(
+            !session.move_selected_block_live(Coord::new(7, 1, 1)),
+            "a target off the map keeps the last one"
+        );
+        assert_eq!(
+            session.selection(),
+            Some(Selection::from_drag(Coord::new(4, 1, 1), Coord::new(4, 1, 1)))
+        );
+        session.cancel_live_move();
+
+        assert_eq!(*session.map().unwrap(), before);
+        assert_eq!(session.selection(), source);
+        assert_eq!(undo_depth(&session), depth);
         assert_render_cache_matches_rebuild(&session);
     }
 }

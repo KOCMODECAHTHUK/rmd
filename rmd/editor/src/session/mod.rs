@@ -46,8 +46,9 @@ mod preview;
 mod search;
 
 use self::{
-    bake::report_bake_output, clipboard::FloatingPaste, diff::DiffState, direction::direction_state,
-    edit::is_reorder_label, highlight::always_highlighted, node::NodeEditState, preview::BlockPreviewCache,
+    bake::report_bake_output, block::PendingMove, clipboard::FloatingPaste, diff::DiffState,
+    direction::direction_state, edit::is_reorder_label, highlight::always_highlighted, node::NodeEditState,
+    preview::BlockPreviewCache,
 };
 pub(crate) use self::{
     bake::{FaultState, RuntimeFault},
@@ -133,6 +134,7 @@ pub struct Session {
     identical: Option<instance::IdenticalCache>,
     coop: Option<Coop>,
     floating_paste: Option<FloatingPaste>,
+    pending_move: Option<PendingMove>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -179,6 +181,7 @@ impl Session {
             identical: None,
             coop: None,
             floating_paste: None,
+            pending_move: None,
         }
     }
 

@@ -29,6 +29,10 @@ pub(in crate::ui) struct ViewGestures {
 
 impl ViewGestures {
     pub(in crate::ui) fn cancel(&mut self, session: &mut Session, id: DocumentId) {
+        if session.state.active() == Some(id) {
+            session.cancel_live_move();
+        }
+
         restore_rectangle_gesture(session, id, &mut self.rectangle_gesture);
         self.block_selection_anchor = None;
         self.block_placement = None;
@@ -50,6 +54,7 @@ pub(super) fn shows_block_selection(tool: Tool) -> bool {
 
 pub(super) fn sync_gestures(session: &Session, gestures: &mut ViewGestures, tool: Tool) {
     if tool != Tool::BlockSelect {
+        // we changed the tool, drop it
         gestures.block_selection_anchor = None;
         gestures.block_placement = None;
     } else {
@@ -57,13 +62,19 @@ pub(super) fn sync_gestures(session: &Session, gestures: &mut ViewGestures, tool
             .block_selection_anchor
             .is_some_and(|anchor| anchor.z != session.z())
         {
+            // we changed z level, drop it
             gestures.block_selection_anchor = None;
         }
 
-        if gestures
-            .block_placement
-            .is_some_and(|placement| Some(placement.source) != session.selection())
-        {
+        if gestures.block_placement.is_some_and(|placement| {
+            let occupied = match placement.placement {
+                SelectionPlacement::Move => placement.target,
+                SelectionPlacement::Copy => placement.source,
+            };
+
+            Some(occupied) != session.selection()
+        }) {
+            // current source of placement is changed, drop it (mapper might have pasted from different map)
             gestures.block_placement = None;
         }
     }
@@ -97,6 +108,7 @@ pub(super) fn conflict_controls_contain(ui: &Ui, session: &Session, frame: &View
 
 pub(super) fn prepare_block_preview(session: &mut Session, frame: &ViewFrame<'_>) {
     if let Some(placement) = frame.gestures.block_placement
+        && placement.placement == SelectionPlacement::Copy
         && session.tool() == Tool::BlockSelect
     {
         session.prepare_block_preview(
@@ -119,12 +131,14 @@ impl UiState {
         let map_size = session.map().map(|map| map.size());
         if gestures.block_selection_anchor.is_some() {
             self.gizmo.cancel();
+            session.cancel_live_move();
 
             return false;
         }
 
         let (Some(source), Some(size)) = (session.selection(), map_size) else {
             self.gizmo.cancel();
+            session.cancel_live_move();
 
             return false;
         };
@@ -151,22 +165,18 @@ impl UiState {
                     mode: session.selection_mode(),
                 });
             },
-            Some(BlockDrag::Move { copy, released }) => {
+            Some(BlockDrag::Move { copy: true, released }) => {
                 gestures.block_placement = (response.selection != source).then_some(PendingBlockPlacement {
                     source,
                     target: response.selection,
+                    placement: SelectionPlacement::Copy,
                 });
                 if released {
                     if gestures.block_placement.take().is_some() {
-                        let placement = if copy {
-                            SelectionPlacement::Copy
-                        } else {
-                            SelectionPlacement::Move
-                        };
                         session.place_selected_block_with_mode(
                             response.selection.min,
                             SelectionRotation::Original,
-                            placement,
+                            SelectionPlacement::Copy,
                             session.selection_mode(),
                         );
                     }
@@ -174,7 +184,27 @@ impl UiState {
                     self.gizmo.cancel();
                 }
             },
-            None => gestures.block_placement = None,
+            Some(BlockDrag::Move { copy: false, released }) => {
+                session.move_selected_block_live(response.selection.min);
+                gestures.block_placement = session
+                    .pending_move_source()
+                    .zip(session.selection())
+                    .filter(|(source, target)| source != target)
+                    .map(|(source, target)| PendingBlockPlacement {
+                        source,
+                        target,
+                        placement: SelectionPlacement::Move,
+                    });
+                if released {
+                    session.finish_live_move();
+                    gestures.block_placement = None;
+                    self.gizmo.cancel();
+                }
+            },
+            None => {
+                gestures.block_placement = None;
+                session.cancel_live_move();
+            },
         }
 
         response.captures_mouse
