@@ -3,11 +3,10 @@ use std::{collections::HashSet, mem, path::Path, sync::Arc};
 use dmm::Prefab;
 use editor::{
     bake::{self, BakeUpdate},
-    document::{DocumentId, PrefabInstanceId},
+    document::{DocumentId, MapDocument, PrefabInstanceId},
     maploader::{
         LoadedModule, OpenModule,
         preview::{ComposeContext, MapView, ModulePreviewState, ModuleRootKey, ModuleRootPreview, PREVIEW_ID_START},
-        resolved_path,
     },
     visual,
 };
@@ -265,18 +264,13 @@ impl Session {
     }
 
     pub(super) fn is_module_document(&self, id: DocumentId) -> bool {
-        let Some(path) = self
-            .state
-            .document(id)
-            .and_then(|document| document.path.as_deref())
-            .map(resolved_path)
-        else {
+        let Some(path) = self.state.document(id).and_then(MapDocument::resolved_path) else {
             return false;
         };
 
         self.caches
             .iter()
-            .any(|(container, cache)| *container != id && cache.modules.uses_file(&path))
+            .any(|(container, cache)| *container != id && cache.modules.uses_file(path))
     }
 
     pub fn sync_open_modules(&mut self) {
@@ -291,7 +285,7 @@ impl Session {
             .filter_map(|document| {
                 Some((
                     document.id(),
-                    resolved_path(document.path.as_deref()?),
+                    document.resolved_path()?.to_path_buf(),
                     document.generation(),
                 ))
             })

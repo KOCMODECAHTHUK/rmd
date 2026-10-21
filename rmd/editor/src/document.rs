@@ -3,7 +3,7 @@ use std::{
     collections::{BTreeMap, BTreeSet, HashSet},
     io::Write,
     mem,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{
         Arc,
         atomic::{AtomicU64, Ordering},
@@ -19,7 +19,7 @@ use crate::{
     command::{self, Edit, EditGroupId, History, LevelEdit, Resize, SelectionChange},
     focus::AreaFocus,
     grid::{Grid, LevelCells},
-    maploader::preview::PREVIEW_ID_START,
+    maploader::{preview::PREVIEW_ID_START, resolved_path},
     patch,
     tool::{PlacementKind, RegionSelectionMode, SelectionMask, insertion_index, placement_kind},
 };
@@ -69,6 +69,7 @@ impl Default for DocumentId {
 pub struct MapDocument {
     id: DocumentId,
     pub path: Option<PathBuf>,
+    resolved_path: Option<PathBuf>,
     pub map: Grid,
     baseline: Map,
     format: MapFormat,
@@ -253,6 +254,7 @@ impl MapDocument {
         Self {
             id: DocumentId::new(),
             path: None,
+            resolved_path: None,
             map: Grid::from_map(&map),
             format: map.format,
             baseline: map,
@@ -362,15 +364,19 @@ impl MapDocument {
     }
 
     pub fn open(path: impl Into<PathBuf>, map: Map, z: u32) -> Self {
+        let path = path.into();
         Self {
-            path: Some(path.into()),
+            resolved_path: Some(resolved_path(&path)),
+            path: Some(path),
             ..Self::new(map, z)
         }
     }
 
     pub fn open_modified(path: impl Into<PathBuf>, map: Map, z: u32) -> Self {
+        let path = path.into();
         Self {
-            path: Some(path.into()),
+            resolved_path: Some(resolved_path(&path)),
+            path: Some(path),
             pending_write: true,
             ..Self::new(map, z)
         }
@@ -383,6 +389,7 @@ impl MapDocument {
         let replaced = Self {
             id: self.id,
             path: self.path.take(),
+            resolved_path: self.resolved_path.take(),
             pending_write,
             generation: self.generation + 1,
             ..Self::new(map, z)
@@ -392,11 +399,22 @@ impl MapDocument {
     }
 
     pub fn create(path: impl Into<PathBuf>, map: Map, z: u32) -> Self {
+        let path = path.into();
         Self {
-            path: Some(path.into()),
+            resolved_path: Some(resolved_path(&path)),
+            path: Some(path),
             needs_initial_save: true,
             ..Self::new(map, z)
         }
+    }
+
+    pub fn set_path(&mut self, path: PathBuf) {
+        self.resolved_path = Some(resolved_path(&path));
+        self.path = Some(path);
+    }
+
+    pub fn resolved_path(&self) -> Option<&Path> {
+        self.resolved_path.as_deref()
     }
 
     pub fn title(&self) -> String {
@@ -990,7 +1008,7 @@ impl MapDocument {
         // unsanitized, so the next save compares against what the tiles hold
         self.baseline = exported;
         self.format = format;
-        self.path = Some(path);
+        self.set_path(path);
         self.needs_initial_save = false;
         self.pending_write = false;
         self.history.mark_saved();

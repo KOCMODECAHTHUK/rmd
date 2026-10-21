@@ -359,7 +359,7 @@ mod tests {
         let (mut session, target) = node_session(node_map(4, 2, &[(start, vec!["/obj/cable"])]), start);
         let id = session.state.active().unwrap();
         let root = session.codebase_dir().unwrap().to_path_buf();
-        session.state.document_mut(id).unwrap().path = Some(root.join("route.dmm"));
+        session.state.document_mut(id).unwrap().set_path(root.join("route.dmm"));
         let original = session.map().unwrap().clone();
         assert!(session.begin_node_edit(target));
         assert!(session.start_node_drag(start));

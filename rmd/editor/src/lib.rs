@@ -377,12 +377,7 @@ impl EditorState {
 
         self.documents
             .iter()
-            .find(|document| {
-                document
-                    .path
-                    .as_deref()
-                    .is_some_and(|candidate| resolved_path(candidate) == path)
-            })
+            .find(|document| document.resolved_path() == Some(path.as_path()))
             .map(MapDocument::id)
     }
 
