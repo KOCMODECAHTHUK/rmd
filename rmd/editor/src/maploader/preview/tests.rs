@@ -1060,6 +1060,23 @@ fn uses_file_tracks_loaded_paths() {
 }
 
 #[test]
+fn an_override_that_fails_to_compose_still_uses_its_file() {
+    let (fixture, source, mut state, path) = open_fixture();
+    let unanchored = open_module(map([2, 1, 1], &[(Coord::new(2, 1, 1), "/obj/live")]));
+
+    state.replace_module(fixture.ctx(&source), &path, Some(unanchored));
+
+    let preview = state.preview.as_ref().unwrap();
+    assert!(
+        preview
+            .diagnostics
+            .iter()
+            .any(|diagnostic| matches!(diagnostic.kind, ErrorKind::Anchors { count: 0 }))
+    );
+    assert!(state.uses_file(&path), "later edits must still reach this map");
+}
+
+#[test]
 fn an_override_alone_does_not_count_as_using_a_file() {
     let (fixture, source, mut state, _path) = open_fixture();
     let other = resolve_module_path(&fixture.directory, "other.dmm").unwrap();

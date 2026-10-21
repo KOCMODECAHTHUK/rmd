@@ -130,8 +130,12 @@ pub struct ModuleOverlay {
 }
 
 impl ModuleOverlay {
+    // a variant that failed to compose still counts, so fixing its file brings it in
     pub fn uses_file(&self, path: &Path) -> bool {
-        self.layers.iter().any(|layer| layer.uses_file(path))
+        self.roots
+            .iter()
+            .flat_map(|root| &root.variants)
+            .any(|variant| variant.choice.path == path)
     }
 
     pub fn view<'a>(&'a self, source: &'a Grid) -> MapView<'a> {
