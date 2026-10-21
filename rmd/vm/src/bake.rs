@@ -368,6 +368,7 @@ pub struct Bake {
     connection_index: HashMap<String, ConnectionChannel>,
     highlights: HashMap<u64, Vec<Highlight>>,
     highlight_faults: HashMap<u64, Fault>,
+    light_faults: HashMap<u64, Fault>,
     module_roots: HashMap<u64, ModuleEntry>,
     ui_fault_target: Option<u64>,
     type_groups: HashMap<TypeId, u32>,
@@ -924,6 +925,10 @@ impl Bake {
             return;
         }
 
+        if let Some(previous) = self.light_faults.remove(&id) {
+            self.diagnostics.remove(&previous);
+        }
+
         let Some(proc) = self.profile.procedure(ProfileHook::Light) else {
             return;
         };
@@ -933,7 +938,8 @@ impl Bake {
             .runtime
             .run(tree, module, proc, profile, Some(object), args, self.limits)
         {
-            self.record_fault(id, fault);
+            self.diagnostics.record(fault.clone());
+            self.light_faults.insert(id, fault);
         }
     }
 
@@ -1525,6 +1531,10 @@ impl Bake {
             }
 
             if let Some(fault) = self.highlight_faults.remove(id) {
+                self.diagnostics.remove(&fault);
+            }
+
+            if let Some(fault) = self.light_faults.remove(id) {
                 self.diagnostics.remove(&fault);
             }
 

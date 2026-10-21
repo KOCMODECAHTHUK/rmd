@@ -3085,6 +3085,36 @@ fn a_bake_fault_reports_each_frame_line() {
 }
 
 #[test]
+fn a_light_fault_survives_the_bake_hook() {
+    let (tree, module) = compile(fixture!("programs/a_light_fault_survives_the_bake_hook.dm"));
+    let atom = Atom {
+        instance: 1,
+        ty: tree.id_of(&TreePath::parse("/obj/lamp")).expect("lamp should exist"),
+        position: Position::new(1, 1, 1),
+        vars: Vec::new(),
+    };
+    let mut bake = Bake::new(
+        &tree,
+        &module,
+        vec![atom.clone()],
+        [1, 1, 1],
+        Limits::default(),
+        IconStates::default(),
+    );
+
+    assert_eq!(baked_state(&bake, 1), Some("baked"));
+    assert_eq!(bake.diagnostics.count(), 1, "{:#?}", bake.diagnostics);
+    let fault = &bake.diagnostics.entries[0].fault;
+    assert_eq!(bake.hook_of(fault), Some(ProfileHook::Light));
+
+    bake.update(&tree, &module, Vec::new(), &[1]);
+    assert_eq!(bake.diagnostics.count(), 0, "{:#?}", bake.diagnostics);
+
+    bake.update(&tree, &module, vec![atom], &[]);
+    assert_eq!(bake.diagnostics.count(), 1, "{:#?}", bake.diagnostics);
+}
+
+#[test]
 fn a_ui_fault_clears_when_the_target_changes() {
     let (tree, module) = compile(fixture!("programs/a_ui_fault_clears_when_the_target_changes.dm"));
     let atom = Atom {
