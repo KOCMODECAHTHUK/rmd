@@ -348,7 +348,7 @@ fn draw_tool_button(ui: &Ui, session: &mut Session, keybindings: KeyBindings, to
         Tool::Select => (KeybindAction::SelectTool, String::from("Drag to select an area")),
         Tool::Delete => (
             KeybindAction::DeleteTool,
-            format!("Click an atom to delete it\n{alternate}+drag: clear visible atoms"),
+            format!("Click an atom to delete it\n{alternate}+drag: delete entire cell"),
         ),
         Tool::Replace => (
             KeybindAction::ReplaceTool,
