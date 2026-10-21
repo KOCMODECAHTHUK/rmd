@@ -20,7 +20,7 @@ use vm::{
 
 use crate::{
     document::{MapDocument, PrefabInstanceId},
-    grid::Grid,
+    maploader::preview::MapView,
     visual::{self, Appearance},
 };
 
@@ -83,7 +83,7 @@ struct RenderContext<'a> {
     tree: &'a ObjectTree,
     icons: &'a HashMap<String, Metadata>,
     textures: &'a TextureCatalog,
-    map: &'a Grid,
+    map: MapView<'a>,
     area: Option<TypeId>,
     visibility: &'a TypeVisibility,
     tile_size: u32,
@@ -393,6 +393,13 @@ pub fn build_with_options(
     tree: &ObjectTree, icons: &HashMap<String, Metadata>, textures: &TextureCatalog, document: &MapDocument,
     options: FrameRenderOptions<'_>,
 ) -> FrameInstances {
+    build_view_with_options(tree, icons, textures, (&document.map).into(), options)
+}
+
+pub fn build_view_with_options(
+    tree: &ObjectTree, icons: &HashMap<String, Metadata>, textures: &TextureCatalog, map: MapView<'_>,
+    options: FrameRenderOptions<'_>,
+) -> FrameInstances {
     let mut keyed_sprites = Vec::new();
     let mut primary_sprites = HashMap::new();
     let mut owner_keys = HashMap::new();
@@ -400,8 +407,7 @@ pub fn build_with_options(
     let mut unknown_placements = HashMap::new();
     let mut area_owners_by_coord = HashMap::<Coord, Vec<PrefabInstanceId>>::new();
     let area = tree.roots().area;
-    let map = &document.map;
-    let area_components = build_area_components(tree, document);
+    let area_components = build_area_components(tree, map);
     let area_component_tiles = index_area_component_tiles(&area_components);
     let render = RenderContext {
         node_types: options.node_types,
@@ -423,7 +429,7 @@ pub fn build_with_options(
                 };
 
                 for (prefab_index, prefab) in tile.iter().enumerate() {
-                    let Some(owner) = document.instance_ids_at(Coord::new(x, y, z)).get(prefab_index).copied() else {
+                    let Some(owner) = map.ids_at(Coord::new(x, y, z)).get(prefab_index).copied() else {
                         continue;
                     };
                     let Some(id) = tree.id_of(&prefab.path) else {
@@ -516,6 +522,21 @@ pub fn update_prefabs_with_options(
     instances: &mut FrameInstances, tree: &ObjectTree, icons: &HashMap<String, Metadata>, textures: &TextureCatalog,
     document: &MapDocument, owners: &[PrefabInstanceId], options: FrameRenderOptions<'_>,
 ) -> PrefabUpdate {
+    update_view_prefabs_with_options(
+        instances,
+        tree,
+        icons,
+        textures,
+        (&document.map).into(),
+        owners,
+        options,
+    )
+}
+
+pub fn update_view_prefabs_with_options(
+    instances: &mut FrameInstances, tree: &ObjectTree, icons: &HashMap<String, Metadata>, textures: &TextureCatalog,
+    map: MapView<'_>, owners: &[PrefabInstanceId], options: FrameRenderOptions<'_>,
+) -> PrefabUpdate {
     let mut owners = owners
         .iter()
         .copied()
@@ -525,7 +546,7 @@ pub fn update_prefabs_with_options(
     owners.sort_unstable_by_key(|owner| owner.get());
 
     for owner in &owners {
-        match document
+        match map
             .prefab_instance(*owner)
             .filter(|instance| tree.id_of(&instance.prefab().path).is_none())
         {
@@ -543,7 +564,7 @@ pub fn update_prefabs_with_options(
         .copied()
         .filter_map(|owner| {
             let old = instances.placements.get(&owner).copied();
-            let current = current_placement(tree, document, owner);
+            let current = current_placement(tree, map, owner);
 
             (old.is_some() || current.is_some()).then_some((owner, old, current))
         })
@@ -552,7 +573,6 @@ pub fn update_prefabs_with_options(
         return PrefabUpdate::Unchanged;
     }
 
-    let map = &document.map;
     let mut topology_coords = HashSet::new();
     let mut dirty_coords = HashSet::new();
     for (_, old, current) in &changes {
@@ -574,7 +594,7 @@ pub fn update_prefabs_with_options(
             .into_iter()
             .chain(current.map(|current| current.coord))
     }) {
-        affected.extend(document.instance_ids_at(coord).iter().copied().filter(|owner| {
+        affected.extend(map.ids_at(coord).iter().copied().filter(|owner| {
             instances
                 .placements
                 .get(owner)
@@ -586,10 +606,10 @@ pub fn update_prefabs_with_options(
         if let Some(owners) = instances.area_owners_by_coord.get(coord) {
             affected.extend(owners.iter().copied());
         }
-        affected.extend(area_owners_at(tree, document, *coord));
+        affected.extend(area_owners_at(tree, map, *coord));
     }
-    for coord in repair_area_components(instances, tree, document, &topology_coords) {
-        affected.extend(document.instance_ids_at(coord).iter().copied());
+    for coord in repair_area_components(instances, tree, map, &topology_coords) {
+        affected.extend(map.ids_at(coord).iter().copied());
     }
 
     for (owner, old, current) in &changes {
@@ -636,7 +656,7 @@ pub fn update_prefabs_with_options(
     let rendered = affected
         .into_iter()
         .map(|affected_owner| {
-            let rendered = document.prefab_instance(affected_owner).and_then(|instance| {
+            let rendered = map.prefab_instance(affected_owner).and_then(|instance| {
                 let prefab = instance.prefab();
                 let location = instance.location;
                 let id = tree.id_of(&prefab.path)?;
@@ -663,8 +683,8 @@ pub fn update_prefabs_with_options(
     PrefabUpdate::Buffers { sprites: sprite_update }
 }
 
-fn current_placement(tree: &ObjectTree, document: &MapDocument, owner: PrefabInstanceId) -> Option<CurrentPlacement> {
-    let instance = document.prefab_instance(owner)?;
+fn current_placement(tree: &ObjectTree, map: MapView<'_>, owner: PrefabInstanceId) -> Option<CurrentPlacement> {
+    let instance = map.prefab_instance(owner)?;
     let prefab = instance.prefab();
     let location = instance.location;
     let id = tree.id_of(&prefab.path)?;
@@ -921,7 +941,7 @@ fn area_outline(
     outline
 }
 
-fn add_area_neighborhood(coords: &mut HashSet<Coord>, coord: Coord, map: &Grid) {
+fn add_area_neighborhood(coords: &mut HashSet<Coord>, coord: Coord, map: MapView<'_>) {
     coords.insert(coord);
     if coord.x > 1 {
         coords.insert(Coord::new(coord.x - 1, coord.y, coord.z));
@@ -937,16 +957,16 @@ fn add_area_neighborhood(coords: &mut HashSet<Coord>, coord: Coord, map: &Grid) 
     }
 }
 
-fn area_owners_at(tree: &ObjectTree, document: &MapDocument, coord: Coord) -> Vec<PrefabInstanceId> {
+fn area_owners_at(tree: &ObjectTree, map: MapView<'_>, coord: Coord) -> Vec<PrefabInstanceId> {
     let Some(area) = tree.roots().area else {
         return Vec::new();
     };
-    let Some(tile) = document.map.tile_at(coord) else {
+    let Some(tile) = map.tile_at(coord) else {
         return Vec::new();
     };
 
     tile.iter()
-        .zip(document.instance_ids_at(coord))
+        .zip(map.ids_at(coord))
         .filter_map(|(prefab, owner)| {
             let id = tree.id_of(&prefab.path)?;
 
@@ -966,7 +986,7 @@ fn remove_area_owner(instances: &mut FrameInstances, coord: Coord, owner: Prefab
 }
 
 fn repair_area_components(
-    instances: &mut FrameInstances, tree: &ObjectTree, document: &MapDocument, changed: &HashSet<Coord>,
+    instances: &mut FrameInstances, tree: &ObjectTree, map: MapView<'_>, changed: &HashSet<Coord>,
 ) -> HashSet<Coord> {
     let Some(area) = tree.roots().area else {
         return HashSet::new();
@@ -975,13 +995,12 @@ fn repair_area_components(
         return HashSet::new();
     }
 
-    let map = &document.map;
     let mut impacted = HashSet::new();
     for coord in changed {
         if let Some(component) = instances.area_components.get(coord) {
             impacted.insert(*component);
         }
-        let Some((prefab, _)) = area_instance_at(tree, area, document, *coord) else {
+        let Some((prefab, _)) = area_instance_at(tree, area, map, *coord) else {
             continue;
         };
         for neighbor in cardinal_neighbors(*coord, map) {
@@ -1022,7 +1041,7 @@ fn repair_area_components(
         if !visited.insert(seed) {
             continue;
         }
-        let Some((prefab, component)) = area_instance_at(tree, area, document, seed) else {
+        let Some((prefab, component)) = area_instance_at(tree, area, map, seed) else {
             continue;
         };
         let prefab = prefab.clone();
@@ -1055,12 +1074,11 @@ fn repair_area_components(
         .collect()
 }
 
-fn build_area_components(tree: &ObjectTree, document: &MapDocument) -> HashMap<Coord, PrefabInstanceId> {
+fn build_area_components(tree: &ObjectTree, map: MapView<'_>) -> HashMap<Coord, PrefabInstanceId> {
     let mut components = HashMap::new();
     let Some(area) = tree.roots().area else {
         return components;
     };
-    let map = &document.map;
     let mut visited = HashSet::new();
 
     for z in 1..=map.size().z.max(1) {
@@ -1070,7 +1088,7 @@ fn build_area_components(tree: &ObjectTree, document: &MapDocument) -> HashMap<C
                 if visited.contains(&seed) {
                     continue;
                 }
-                let Some((prefab, component_owner)) = area_instance_at(tree, area, document, seed) else {
+                let Some((prefab, component_owner)) = area_instance_at(tree, area, map, seed) else {
                     visited.insert(seed);
 
                     continue;
@@ -1112,20 +1130,18 @@ fn index_area_component_tiles(
 }
 
 fn area_instance_at<'a>(
-    tree: &ObjectTree, area: TypeId, document: &'a MapDocument, coord: Coord,
+    tree: &ObjectTree, area: TypeId, map: MapView<'a>, coord: Coord,
 ) -> Option<(&'a Prefab, PrefabInstanceId)> {
-    let tile = document.map.tile_at(coord)?;
+    let tile = map.tile_at(coord)?;
 
-    tile.iter()
-        .zip(document.instance_ids_at(coord))
-        .find_map(|(prefab, owner)| {
-            let id = tree.id_of(&prefab.path)?;
+    tile.iter().zip(map.ids_at(coord)).find_map(|(prefab, owner)| {
+        let id = tree.id_of(&prefab.path)?;
 
-            tree.is_subtype_of(id, area).then_some((prefab, *owner))
-        })
+        tree.is_subtype_of(id, area).then_some((prefab, *owner))
+    })
 }
 
-fn cardinal_neighbors(coord: Coord, map: &Grid) -> impl Iterator<Item = Coord> {
+fn cardinal_neighbors(coord: Coord, map: MapView<'_>) -> impl Iterator<Item = Coord> {
     [
         (coord.x > 1).then(|| Coord::new(coord.x - 1, coord.y, coord.z)),
         (coord.x < map.size().x).then(|| Coord::new(coord.x + 1, coord.y, coord.z)),
@@ -1136,7 +1152,7 @@ fn cardinal_neighbors(coord: Coord, map: &Grid) -> impl Iterator<Item = Coord> {
     .flatten()
 }
 
-fn area_edges(tree: &ObjectTree, area: TypeId, map: &Grid, prefab: &Prefab, coord: Coord) -> u32 {
+fn area_edges(tree: &ObjectTree, area: TypeId, map: MapView<'_>, prefab: &Prefab, coord: Coord) -> u32 {
     let matches = |coord| area_prefab_at(tree, area, map, coord).is_some_and(|other| same_area(prefab, other));
     let mut edges = 0;
 
@@ -1156,7 +1172,7 @@ fn area_edges(tree: &ObjectTree, area: TypeId, map: &Grid, prefab: &Prefab, coor
     edges
 }
 
-fn area_prefab_at<'a>(tree: &ObjectTree, area: TypeId, map: &'a Grid, coord: Coord) -> Option<&'a Prefab> {
+fn area_prefab_at<'a>(tree: &ObjectTree, area: TypeId, map: MapView<'a>, coord: Coord) -> Option<&'a Prefab> {
     map.tile_at(coord)?.iter().find(|prefab| {
         tree.id_of(&prefab.path)
             .is_some_and(|candidate| tree.is_subtype_of(candidate, area))

@@ -17,10 +17,10 @@ use objtree::{ObjectTree, TypeId};
 
 use crate::{
     Fault, FaultKind, GenericValue, Limits, StackFrame,
+    bake::Placement,
     heap::{Heap, Object, ObjectId},
-    profile::ProfileConfig,
     value::{IteratorId, ListData, ListId, ModifiedType, ProcRef, RangeValue, Receiver},
-    world::World,
+    world::{Position, World},
 };
 
 type Result<T, E = Fault> = std::result::Result<T, E>;
@@ -36,7 +36,10 @@ pub struct Runtime {
     pub(crate) rotations: Vec<crate::bake::Rotation>,
     pub(crate) defining_groups: bool,
     output: Vec<String>,
-    profile_config: ProfileConfig,
+    pub(crate) modular_roots: Vec<TypeId>,
+    pub(crate) placement: crate::bake::PlacementState,
+    pub(crate) coordinate_modules: HashMap<Position, Placement>,
+    pub(crate) pending_placements: crate::bake::PendingPlacements,
     pub(crate) global: Option<ObjectId>,
     pub(crate) world_object: Option<ObjectId>,
     pub(crate) profile: Option<ObjectId>,
@@ -51,10 +54,6 @@ impl Runtime {
         std::mem::take(&mut self.output)
     }
 
-    pub fn modular_loader(&self) -> Option<&str> {
-        self.profile_config.modular_loader()
-    }
-
     /// `seed` is the atom a hook was called about, which is what its randomness and its memo safety
     /// are measured against. It is not `src`: a hook's `src` is the profile, which has no position.
     #[allow(clippy::too_many_arguments)]
@@ -64,7 +63,7 @@ impl Runtime {
     ) -> Result<GenericValue> {
         self.ensure_global()?;
         self.ensure_world(tree)?;
-        self.heap.begin();
+        self.begin_journal();
 
         let result = {
             let mut evaluator = Evaluator::new(self, tree, module, limits, seed);
@@ -76,12 +75,26 @@ impl Runtime {
         };
 
         if result.is_ok() {
-            self.heap.commit();
+            self.commit_journal();
         } else {
-            self.heap.rollback();
+            self.rollback_journal();
         }
 
         result
+    }
+
+    pub(crate) fn begin_journal(&mut self) {
+        self.heap.begin();
+        self.pending_placements.mark();
+    }
+
+    pub(crate) fn commit_journal(&mut self) {
+        self.heap.commit();
+    }
+
+    pub(crate) fn rollback_journal(&mut self) {
+        self.heap.rollback();
+        self.pending_placements.discard();
     }
 
     pub fn run_world(
@@ -132,9 +145,8 @@ impl Runtime {
     pub(crate) fn create_profile(
         &mut self, tree: &ObjectTree, module: &Module, ty: TypeId, constructor: Option<ProcId>, limits: Limits,
     ) -> Result<ObjectId> {
-        self.profile_config = ProfileConfig::default();
-        ProfileConfig::validate_declarations(tree, ty)?;
-
+        self.modular_roots.clear();
+        self.coordinate_modules.clear();
         self.ensure_global()?;
         self.ensure_world(tree)?;
 
@@ -154,8 +166,6 @@ impl Runtime {
         self.defining_groups = false;
 
         result?;
-        self.profile_config =
-            ProfileConfig::capture(&mut Evaluator::new(self, tree, module, limits, None), tree, ty, id)?;
 
         Ok(id)
     }
@@ -920,8 +930,9 @@ impl<'a> Evaluator<'a> {
                     self.delete(value)?;
                 },
                 Op::Throw => {
-                    self.thrown = Some(self.pop(frame)?);
-                    return Err(self.fault(FaultKind::Thrown));
+                    let value = self.pop(frame)?;
+
+                    return Err(self.throw(value));
                 },
                 Op::Output => match self.enum_operand::<OutputTargetKind>(frame, "output target")? {
                     OutputTargetKind::Value => {
@@ -957,7 +968,7 @@ impl<'a> Evaluator<'a> {
                     match self.execute_until(frame, Some(merge)) {
                         Ok(Flow::Continue) => {},
                         Ok(flow) => return Ok(flow),
-                        Err(fault) if fault.kind == FaultKind::Thrown => {
+                        Err(fault) if matches!(fault.kind, FaultKind::Thrown(_)) => {
                             frame.stack.truncate(stack_len);
                             frame.ip = catch;
                             match self.execute_until(frame, Some(merge))? {
@@ -977,7 +988,7 @@ impl<'a> Evaluator<'a> {
                     match self.execute_until(frame, None) {
                         Ok(Flow::Return) => return Ok(Flow::Return),
                         Ok(_) => {},
-                        Err(fault) if fault.kind == FaultKind::Thrown => self.thrown = None,
+                        Err(fault) if matches!(fault.kind, FaultKind::Thrown(_)) => self.thrown = None,
                         Err(fault) if fault.kind == FaultKind::Sleep => {},
                         Err(fault) => return Err(fault),
                     }
@@ -2524,6 +2535,37 @@ impl Evaluator<'_> {
 }
 
 impl Evaluator<'_> {
+    // what an uncaught throw reports: an /exception's name, or the value itself
+    pub(crate) fn throw(&mut self, value: GenericValue) -> Fault {
+        let name = match &value {
+            GenericValue::Object(_) => self
+                .read_field(value.clone(), &Identifier::from("name"))
+                .ok()
+                .and_then(|name| name.text().map(ToOwned::to_owned)),
+            _ => None,
+        };
+        let description = name.unwrap_or_else(|| value.display());
+        self.thrown = Some(value);
+
+        self.fault(FaultKind::Thrown(description))
+    }
+
+    pub(crate) fn throw_exception(&mut self, message: String) -> Fault {
+        let exception = self
+            .new_object(GenericValue::Path(Box::new(TreePath::parse("/exception"))), Vec::new())
+            .and_then(|exception| {
+                let name = self.text(message.clone())?;
+                self.write_field(exception.clone(), Identifier::from("name"), name)?;
+
+                Ok(exception)
+            });
+
+        match exception {
+            Ok(exception) => self.throw(exception),
+            Err(fault) => fault,
+        }
+    }
+
     pub fn new_object(
         &mut self, ty: GenericValue, args: Vec<(Option<Identifier>, GenericValue)>,
     ) -> Result<GenericValue> {

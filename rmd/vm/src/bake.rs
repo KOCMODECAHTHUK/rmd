@@ -7,6 +7,7 @@ use std::{
     collections::{HashMap, HashSet, hash_map::DefaultHasher},
     hash::{Hash, Hasher},
     ops::Range,
+    path::PathBuf,
     sync::{Arc, OnceLock},
 };
 
@@ -18,6 +19,7 @@ use crate::{
     heap::{Object, ObjectId},
     lighting::{LightSource, LightingAtom, direction_angle, parse_color},
     matrix,
+    value::ListData,
     world::Position,
 };
 pub use crate::{
@@ -85,6 +87,85 @@ struct Placed {
     position: Position,
     /// hash of the map overrides, all a fingerprint needs of them
     constants: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModuleRoot {
+    pub files: Vec<String>,
+    pub anchor: Option<TypeId>,
+    pub skip: Vec<TypeId>,
+    pub offset: [i32; 3],
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Placement {
+    Maps(ModuleRoot),
+    Error(String),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PlacementOrigin {
+    Hook,
+    Profile,
+}
+
+#[derive(Debug)]
+enum ModuleState {
+    Maps(ModuleRoot),
+    Error(String),
+    Fault(Fault),
+}
+
+#[derive(Debug)]
+struct ModuleEntry {
+    state: ModuleState,
+    origin: PlacementOrigin,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PlacementTarget {
+    Root(ObjectId),
+    At(Position),
+}
+
+#[derive(Debug, Default)]
+pub(crate) enum PlacementState {
+    #[default]
+    Idle,
+    Task {
+        roots: HashSet<ObjectId>,
+        entries: HashMap<ObjectId, Placement>,
+    },
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct PendingPlacements {
+    entries: Vec<(ObjectId, Placement)>,
+    mark: usize,
+}
+
+impl PendingPlacements {
+    pub(crate) fn push(&mut self, root: ObjectId, placement: Placement) {
+        self.entries.push((root, placement));
+    }
+
+    pub(crate) fn mark(&mut self) {
+        self.mark = self.entries.len();
+    }
+
+    pub(crate) fn discard(&mut self) {
+        self.entries.truncate(self.mark);
+    }
+
+    fn is_marked_empty(&self) -> bool {
+        self.entries.len() == self.mark
+    }
+
+    fn take(&mut self) -> Vec<(ObjectId, Placement)> {
+        self.mark = 0;
+
+        std::mem::take(&mut self.entries)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -287,6 +368,7 @@ pub struct Bake {
     connection_index: HashMap<String, ConnectionChannel>,
     highlights: HashMap<u64, Vec<Highlight>>,
     highlight_faults: HashMap<u64, Fault>,
+    module_roots: HashMap<u64, ModuleEntry>,
     ui_fault_target: Option<u64>,
     type_groups: HashMap<TypeId, u32>,
     profile: ProfileDefinition,
@@ -303,20 +385,81 @@ pub enum Stage {
     Smooth,
 }
 
+pub struct PendingBake<'a> {
+    bake: Bake,
+    tree: &'a ObjectTree,
+    module: &'a Module,
+}
+
+impl PendingBake<'_> {
+    pub fn modules(&self) -> impl Iterator<Item = (u64, &ModuleRoot)> {
+        self.bake.modules()
+    }
+
+    pub fn module_faults(&self) -> impl Iterator<Item = (u64, &Fault)> {
+        self.bake.module_faults()
+    }
+
+    pub fn module_fault(&self, id: u64) -> Option<&Fault> {
+        self.bake.module_fault(id)
+    }
+
+    pub fn module_errors(&self) -> impl Iterator<Item = (u64, &str)> {
+        self.bake.module_errors()
+    }
+
+    pub fn coordinate_modules(&self) -> impl Iterator<Item = (Position, Result<&ModuleRoot, &str>)> {
+        self.bake.coordinate_modules()
+    }
+
+    pub fn replace_atoms(
+        &mut self, replacements: Vec<Atom>, removed: &[u64], progress: impl FnMut(Stage, usize, usize),
+    ) {
+        self.bake
+            .replace_atoms(self.tree, self.module, replacements, removed, progress);
+    }
+
+    pub fn finish_with_progress(mut self, progress: impl FnMut(Stage, usize, usize)) -> Bake {
+        if self.bake.initialized {
+            self.bake.bake_all_with_progress(self.tree, self.module, progress);
+        }
+
+        self.bake
+    }
+}
+
+struct Replacements {
+    removed: Vec<u64>,
+    dirty: HashSet<Position>,
+    inserted: Vec<u64>,
+}
+
 impl Bake {
     pub fn new(
         tree: &ObjectTree, module: &Module, atoms: Vec<Atom>, size: [i32; 3], limits: Limits, icons: IconStates,
     ) -> Self {
         let profile = profile_type(tree).expect("Bake::new requires a valid default profile");
 
-        Self::new_with_profile(tree, module, profile, atoms, size, limits, icons)
+        Self::new_with_profile(tree, module, profile, atoms, size, limits, icons, None)
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn new_with_profile(
         tree: &ObjectTree, module: &Module, profile: TypeId, atoms: Vec<Atom>, size: [i32; 3], limits: Limits,
-        icons: IconStates,
+        icons: IconStates, root: Option<PathBuf>,
     ) -> Self {
-        Self::with_profile_and_progress(tree, module, profile, atoms, size, limits, icons, |_, _, _| {})
+        Self::with_profile_and_progress(
+            tree,
+            module,
+            profile,
+            atoms,
+            size,
+            limits,
+            icons,
+            root,
+            None,
+            |_, _, _| {},
+        )
     }
 
     pub fn node_groups(&self) -> &[NodeGroup] {
@@ -331,12 +474,51 @@ impl Bake {
         if self.initialized { &self.runtime.rotations } else { &[] }
     }
 
-    pub fn modular_loader(&self) -> Option<&str> {
-        if self.initialized {
-            self.runtime.modular_loader()
-        } else {
-            None
+    pub fn modules(&self) -> impl Iterator<Item = (u64, &ModuleRoot)> {
+        self.module_roots.iter().filter_map(|(id, entry)| match &entry.state {
+            ModuleState::Maps(root) => Some((*id, root)),
+            _ => None,
+        })
+    }
+
+    pub fn module_faults(&self) -> impl Iterator<Item = (u64, &Fault)> {
+        self.module_roots.iter().filter_map(|(id, entry)| match &entry.state {
+            ModuleState::Fault(fault) => Some((*id, fault)),
+            _ => None,
+        })
+    }
+
+    pub fn module_fault(&self, id: u64) -> Option<&Fault> {
+        match &self.module_roots.get(&id)?.state {
+            ModuleState::Fault(fault) => Some(fault),
+            _ => None,
         }
+    }
+
+    pub fn module_errors(&self) -> impl Iterator<Item = (u64, &str)> {
+        self.module_roots.iter().filter_map(|(id, entry)| match &entry.state {
+            ModuleState::Error(error) => Some((*id, error.as_str())),
+            _ => None,
+        })
+    }
+
+    pub fn coordinate_modules(&self) -> impl Iterator<Item = (Position, Result<&ModuleRoot, &str>)> {
+        let mut entries = if self.initialized {
+            self.runtime.coordinate_modules.iter().collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
+
+        entries.sort_by_key(|(position, _)| (position.z, position.y, position.x));
+
+        entries.into_iter().map(|(position, placement)| {
+            let module = match placement {
+                Placement::Maps(root) => Ok(root),
+                Placement::Error(error) => Err(error.as_str()),
+            };
+
+            (*position, module)
+        })
     }
 
     pub fn with_progress(
@@ -345,14 +527,36 @@ impl Bake {
     ) -> Self {
         let profile = profile_type(tree).expect("Bake::with_progress requires a valid default profile");
 
-        Self::with_profile_and_progress(tree, module, profile, atoms, size, limits, icons, progress)
+        Self::with_profile_and_progress(tree, module, profile, atoms, size, limits, icons, None, None, progress)
     }
 
     #[allow(clippy::too_many_arguments)]
     pub fn with_profile_and_progress(
         tree: &ObjectTree, module: &Module, profile: TypeId, atoms: Vec<Atom>, size: [i32; 3], limits: Limits,
-        icons: IconStates, mut progress: impl FnMut(Stage, usize, usize),
+        icons: IconStates, root: Option<PathBuf>, map_path: Option<String>,
+        mut progress: impl FnMut(Stage, usize, usize),
     ) -> Self {
+        Self::initialize_with_profile_and_progress(
+            tree,
+            module,
+            profile,
+            atoms,
+            size,
+            limits,
+            icons,
+            root,
+            map_path,
+            &mut progress,
+        )
+        .finish_with_progress(progress)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn initialize_with_profile_and_progress<'a>(
+        tree: &'a ObjectTree, module: &'a Module, profile: TypeId, atoms: Vec<Atom>, size: [i32; 3], limits: Limits,
+        icons: IconStates, root: Option<PathBuf>, map_path: Option<String>,
+        mut progress: impl FnMut(Stage, usize, usize),
+    ) -> PendingBake<'a> {
         let definition = ProfileDefinition::resolve(tree, &module.index, profile);
         let mut bake = Self {
             limits,
@@ -362,6 +566,8 @@ impl Bake {
 
         bake.runtime.world.size = size;
         bake.runtime.icons = icons;
+        bake.runtime.world.root = root;
+        bake.runtime.world.map_path = map_path;
 
         let mut atoms = atoms;
         atoms.sort_by_key(|atom| atom.instance);
@@ -388,18 +594,29 @@ impl Bake {
         progress(Stage::Initialize, 1, 1);
         if let Err(fault) = constructed {
             bake.diagnostics.record(fault);
-
-            return bake;
+        } else {
+            bake.initialized = true;
+            bake.drain_placements(PlacementOrigin::Profile);
+            let ids = bake.sorted_ids();
+            bake.module_pass(tree, module, &ids);
+            bake.drain_placements(PlacementOrigin::Hook);
         }
-        bake.initialized = true;
 
-        let ids = bake.sorted_ids();
+        PendingBake { bake, tree, module }
+    }
+
+    fn bake_all_with_progress(
+        &mut self, tree: &ObjectTree, module: &Module, mut progress: impl FnMut(Stage, usize, usize),
+    ) {
+        let ids = self.sorted_ids();
+        let total = ids.len();
 
         for (index, id) in ids.iter().enumerate() {
             if index.is_multiple_of(4096) {
                 progress(Stage::Prepare, index, total);
             }
-            bake.prepare(tree, module, *id);
+
+            self.prepare(tree, module, *id);
         }
 
         progress(Stage::Prepare, total, total);
@@ -408,9 +625,11 @@ impl Bake {
             if index.is_multiple_of(4096) {
                 progress(Stage::Connections, index, total);
             }
-            bake.connect(tree, module, *id);
+
+            self.connect(tree, module, *id);
         }
-        bake.rebuild_connection_index();
+
+        self.rebuild_connection_index();
         progress(Stage::Connections, total, total);
 
         for (index, id) in ids.iter().enumerate() {
@@ -418,7 +637,7 @@ impl Bake {
                 progress(Stage::Highlights, index, total);
             }
 
-            bake.highlight(tree, module, *id);
+            self.highlight(tree, module, *id);
         }
 
         progress(Stage::Highlights, total, total);
@@ -427,24 +646,25 @@ impl Bake {
             if index.is_multiple_of(4096) {
                 progress(Stage::Light, index, total);
             }
-            bake.light(tree, module, *id);
+
+            self.light(tree, module, *id);
         }
 
         progress(Stage::Light, total, total);
 
-        if bake.profile.procedure(ProfileHook::Light).is_some() {
+        if self.profile.procedure(ProfileHook::Light).is_some() {
             let atoms = ids
                 .iter()
-                .filter_map(|id| Some((*id, bake.harvest_light(tree, *id)?)))
+                .filter_map(|id| Some((*id, self.harvest_light(tree, *id)?)))
                 .collect::<Vec<_>>();
-            bake.lighting = Some(LightingMap::build(size, atoms));
+            self.lighting = Some(LightingMap::build(self.runtime.world.size, atoms));
         }
 
         let mut cache = AppearanceCache::default();
         for id in &ids {
-            if let Some(fingerprint) = bake
+            if let Some(fingerprint) = self
                 .fingerprint(*id)
-                .or_else(|| bake.atoms.get(id).map(|atom| atom.constants))
+                .or_else(|| self.atoms.get(id).map(|atom| atom.constants))
             {
                 cache.fingerprints.insert(*id, fingerprint);
             }
@@ -454,13 +674,13 @@ impl Bake {
             if index.is_multiple_of(4096) {
                 progress(Stage::Smooth, index, total);
             }
-            bake.bake_atom(tree, module, *id, Some(&mut cache));
+
+            self.bake_atom(tree, module, *id, Some(&mut cache));
         }
 
         progress(Stage::Smooth, total, total);
-        bake.compose();
-
-        bake
+        self.compose();
+        self.drain_placements(PlacementOrigin::Hook);
     }
 
     // the new level's atoms go in through `update`
@@ -525,6 +745,7 @@ impl Bake {
         let frame = self
             .runtime
             .ui_frame(tree, module, proc, object, dockspace, feedback, self.limits);
+        self.drain_placements(PlacementOrigin::Profile);
         match &frame {
             Err(fault) => {
                 self.ui_fault = Some(fault.clone());
@@ -903,6 +1124,115 @@ impl Bake {
         }
     }
 
+    fn clear_module(&mut self, id: u64) {
+        let Some(ModuleEntry {
+            state: ModuleState::Fault(previous),
+            ..
+        }) = self.module_roots.remove(&id)
+        else {
+            return;
+        };
+
+        if !self.is_module_fault_shared(&previous) {
+            self.diagnostics.remove(&previous);
+        }
+    }
+
+    fn clear_hook_module(&mut self, id: u64) {
+        let is_hook = self
+            .module_roots
+            .get(&id)
+            .is_some_and(|entry| entry.origin == PlacementOrigin::Hook);
+        if is_hook {
+            self.clear_module(id);
+        }
+    }
+
+    fn is_module_fault_shared(&self, fault: &Fault) -> bool {
+        self.module_faults().any(|(_, other)| other.key() == fault.key())
+    }
+
+    fn set_module(&mut self, id: u64, state: ModuleState, origin: PlacementOrigin) {
+        self.clear_module(id);
+        if let ModuleState::Fault(fault) = &state
+            && !self.is_module_fault_shared(fault)
+        {
+            self.diagnostics.record(fault.clone());
+        }
+
+        self.module_roots.insert(id, ModuleEntry { state, origin });
+    }
+
+    fn drain_placements(&mut self, origin: PlacementOrigin) {
+        for (object, placement) in self.runtime.pending_placements.take() {
+            let Some(id) = self.runtime.heap.object(object).and_then(|object| object.instance) else {
+                continue;
+            };
+
+            if self.objects.get(&id) != Some(&object) {
+                continue;
+            }
+
+            let state = match placement {
+                Placement::Maps(root) => ModuleState::Maps(root),
+                Placement::Error(error) => ModuleState::Error(error),
+            };
+
+            self.set_module(id, state, origin);
+        }
+    }
+
+    fn module_pass(&mut self, tree: &ObjectTree, module: &Module, ids: &[u64]) {
+        let Some(task) = self.profile.procedure(ProfileHook::ProcessModularRoot) else {
+            return;
+        };
+
+        let mut roots = ids
+            .iter()
+            .filter(|id| !self.failed.contains(id))
+            .filter_map(|id| {
+                let object = self.objects.get(id).copied()?;
+                let ty = self.runtime.heap.object(object)?.ty;
+                let is_root = self
+                    .runtime
+                    .modular_roots
+                    .iter()
+                    .any(|root| tree.is_subtype_of(ty, *root));
+
+                is_root.then_some((*id, object))
+            })
+            .collect::<Vec<_>>();
+        roots.sort_unstable_by_key(|(id, _)| *id);
+        roots.dedup_by_key(|(id, _)| *id);
+        if roots.is_empty() {
+            return;
+        }
+
+        for (id, _) in &roots {
+            self.clear_hook_module(*id);
+        }
+
+        let objects = roots.iter().map(|(_, object)| *object).collect::<Vec<_>>();
+        match self.runtime.placements(tree, module, task, &objects, self.limits) {
+            Ok(mut placements) => {
+                for (id, object) in roots {
+                    let state = match placements.remove(&object) {
+                        Some(Placement::Maps(root)) => ModuleState::Maps(root),
+                        Some(Placement::Error(error)) => ModuleState::Error(error),
+                        None => continue,
+                    };
+
+                    self.set_module(id, state, PlacementOrigin::Hook);
+                }
+            },
+            Err(fault) => {
+                for (id, _) in roots {
+                    self.set_module(id, ModuleState::Fault(fault.clone()), PlacementOrigin::Hook);
+                }
+            },
+        }
+    }
+
     fn record_fault(&mut self, id: u64, fault: Fault) {
         if let Some(previous) = self.faults.insert(id, fault.clone()) {
             self.diagnostics.remove(&previous);
@@ -1129,10 +1459,10 @@ impl Bake {
         self.update_with_progress(tree, module, replacements, removed, |_, _, _| {})
     }
 
-    pub fn update_with_progress(
+    fn replace_atoms(
         &mut self, tree: &ObjectTree, module: &Module, replacements: Vec<Atom>, removed: &[u64],
         mut progress: impl FnMut(Stage, usize, usize),
-    ) -> BakeUpdate {
+    ) -> Replacements {
         let mut replacements_by_id = HashMap::new();
         for atom in replacements {
             replacements_by_id.insert(atom.instance, atom);
@@ -1151,7 +1481,9 @@ impl Bake {
             .collect::<Vec<_>>();
         remove.sort_unstable();
 
+        let replaced = replacements.iter().map(|atom| atom.instance).collect::<HashSet<_>>();
         for id in &remove {
+            let is_replaced = replaced.contains(id);
             if let Some(atom) = self.atoms.remove(id) {
                 dirty.insert(atom.position);
                 if let Some(lighting) = self.lighting.as_mut() {
@@ -1196,6 +1528,11 @@ impl Bake {
                 self.diagnostics.remove(&fault);
             }
 
+            if is_replaced {
+                self.clear_hook_module(*id);
+            } else {
+                self.clear_module(*id);
+            }
             self.connection_endpoints.remove(id);
             self.highlights.remove(id);
             self.failed.remove(id);
@@ -1215,6 +1552,29 @@ impl Bake {
         for position in &dirty {
             self.link_cell(tree, *position);
         }
+
+        if self.initialized {
+            self.module_pass(tree, module, &inserted);
+            self.drain_placements(PlacementOrigin::Hook);
+        }
+
+        Replacements {
+            removed: remove,
+            dirty,
+            inserted,
+        }
+    }
+
+    pub fn update_with_progress(
+        &mut self, tree: &ObjectTree, module: &Module, replacements: Vec<Atom>, removed: &[u64],
+        mut progress: impl FnMut(Stage, usize, usize),
+    ) -> BakeUpdate {
+        let Replacements {
+            removed: remove,
+            dirty,
+            inserted,
+        } = self.replace_atoms(tree, module, replacements, removed, &mut progress);
+        let total = inserted.len();
         if self.initialized {
             for (index, id) in inserted.iter().enumerate() {
                 if index.is_multiple_of(4096) {
@@ -1279,6 +1639,8 @@ impl Bake {
                 self.bake_atom(tree, module, *id, None);
             }
         }
+
+        self.drain_placements(PlacementOrigin::Hook);
         let mut changed = self.compose();
         changed.extend(remove);
         changed.sort_unstable();
@@ -1380,6 +1742,8 @@ impl Bake {
             self.bake_atom(tree, module, id, None);
         }
 
+        self.drain_placements(PlacementOrigin::Hook);
+
         BakeUpdate {
             appearances: self.compose(),
             lighting,
@@ -1454,6 +1818,191 @@ fn field_number(fields: &[(GenericValue, Option<GenericValue>)], name: &str, def
             if value.is_finite() { value } else { default }
         },
     )
+}
+
+pub(crate) fn placement_entry(
+    evaluator: &mut crate::eval::Evaluator<'_>, value: GenericValue,
+) -> Result<(PlacementTarget, Placement), Fault> {
+    let invalid = |evaluator: &crate::eval::Evaluator<'_>, message: &str| {
+        evaluator.fault(FaultKind::InvalidOperation(message.into()))
+    };
+
+    let GenericValue::List(list) = value else {
+        return Err(invalid(
+            evaluator,
+            "each demir_place_modular() entry must be an associative list",
+        ));
+    };
+
+    let fields = evaluator
+        .runtime
+        .heap
+        .list(list)
+        .map(|list| list.entries.clone())
+        .ok_or_else(|| evaluator.fault(FaultKind::InvalidReference))?;
+
+    let target = match (field(&fields, "root"), field(&fields, "at")) {
+        (Some(_), Some(_)) => {
+            return Err(invalid(
+                evaluator,
+                "demir_place_modular() entry takes \"root\" or \"at\", not both",
+            ));
+        },
+        (Some(GenericValue::Object(root)), None) => PlacementTarget::Root(*root),
+        (Some(_), None) | (None, None) => {
+            return Err(invalid(
+                evaluator,
+                "demir_place_modular() entry needs a \"root\" atom or an \"at\" coordinate",
+            ));
+        },
+        (None, Some(at)) => PlacementTarget::At(coordinate(evaluator, at)?),
+    };
+
+    if let Some(error) = field(&fields, "error") {
+        let GenericValue::Text(error) = error else {
+            return Err(invalid(evaluator, "demir_place_modular() error must be text"));
+        };
+
+        return Ok((target, Placement::Error(error.to_string())));
+    }
+
+    let Some(maps) = field(&fields, "maps") else {
+        return Err(invalid(
+            evaluator,
+            "demir_place_modular() entry needs \"maps\" or \"error\"",
+        ));
+    };
+
+    let mut files = Vec::new();
+    let GenericValue::List(list) = maps else {
+        return Err(invalid(evaluator, "demir_place_modular() maps must be a list of text"));
+    };
+
+    let entries = evaluator
+        .runtime
+        .heap
+        .list(*list)
+        .map(|list| list.entries.clone())
+        .ok_or_else(|| evaluator.fault(FaultKind::InvalidReference))?;
+    for (entry, _) in entries {
+        let GenericValue::Text(text) = entry else {
+            return Err(invalid(evaluator, "each demir_place_modular() map must be text"));
+        };
+
+        files.push(text.to_string());
+    }
+
+    let anchor = match field(&fields, "anchor") {
+        None | Some(GenericValue::Null) => None,
+        Some(GenericValue::Path(path)) => Some(
+            evaluator
+                .tree
+                .id_of(path)
+                .ok_or_else(|| invalid(evaluator, "demir_place_modular() anchor must be a defined type"))?,
+        ),
+        Some(_) => return Err(invalid(evaluator, "demir_place_modular() anchor must be a type")),
+    };
+
+    let skipped = match field(&fields, "skip") {
+        None | Some(GenericValue::Null) => Vec::new(),
+        Some(GenericValue::List(list)) => evaluator
+            .runtime
+            .heap
+            .list(*list)
+            .map(|list| list.entries.iter().map(|(entry, _)| entry.clone()).collect())
+            .ok_or_else(|| evaluator.fault(FaultKind::InvalidReference))?,
+        Some(value) => vec![value.clone()],
+    };
+
+    let mut skip = Vec::new();
+    for entry in skipped {
+        let GenericValue::Path(path) = &entry else {
+            return Err(invalid(
+                evaluator,
+                "demir_place_modular() skip must be a type or a list of types",
+            ));
+        };
+
+        let ty = evaluator
+            .tree
+            .id_of(path)
+            .ok_or_else(|| invalid(evaluator, "demir_place_modular() skip must name defined types"))?;
+        skip.push(ty);
+    }
+
+    let offset = match field(&fields, "offset") {
+        None | Some(GenericValue::Null) => Some([0; 3]),
+        Some(GenericValue::List(list)) => {
+            let entries = evaluator
+                .runtime
+                .heap
+                .list(*list)
+                .map(|list| list.entries.clone())
+                .ok_or_else(|| evaluator.fault(FaultKind::InvalidReference))?;
+            let numbers = entries
+                .iter()
+                .map(|(entry, _)| match entry {
+                    GenericValue::Num(number) => Some(*number as i32),
+                    _ => None,
+                })
+                .collect::<Option<Vec<_>>>();
+
+            match numbers.as_deref() {
+                Some(&[dx, dy]) => Some([dx, dy, 0]),
+                Some(&[dx, dy, dz]) => Some([dx, dy, dz]),
+                _ => None,
+            }
+        },
+        Some(_) => None,
+    };
+
+    let Some(offset) = offset else {
+        return Err(invalid(
+            evaluator,
+            "demir_place_modular() offset must be list(dx, dy) or list(dx, dy, dz)",
+        ));
+    };
+
+    Ok((
+        target,
+        Placement::Maps(ModuleRoot {
+            files,
+            anchor,
+            skip,
+            offset,
+        }),
+    ))
+}
+
+fn coordinate(evaluator: &mut crate::eval::Evaluator<'_>, value: &GenericValue) -> Result<Position, Fault> {
+    let invalid = || {
+        evaluator.fault(FaultKind::InvalidOperation(
+            "demir_place_modular() at must be list(x, y, z)".into(),
+        ))
+    };
+
+    let GenericValue::List(list) = value else {
+        return Err(invalid());
+    };
+
+    let entries = evaluator
+        .runtime
+        .heap
+        .list(*list)
+        .map(|list| list.entries.clone())
+        .ok_or_else(|| evaluator.fault(FaultKind::InvalidReference))?;
+    let numbers = entries
+        .iter()
+        .map(|(entry, _)| match entry {
+            GenericValue::Num(number) if number.fract() == 0.0 && *number >= 1.0 => Some(*number as i32),
+            _ => None,
+        })
+        .collect::<Option<Vec<_>>>();
+
+    match numbers.as_deref() {
+        Some(&[x, y, z]) => Ok(Position { x, y, z }),
+        _ => Err(invalid()),
+    }
 }
 
 fn highlight_from_fields(
@@ -1568,7 +2117,7 @@ impl Runtime {
         self.ensure_global().map_err(|fault| fault.entering(module, proc))?;
 
         let profile = self.profile;
-        self.heap.begin();
+        self.begin_journal();
         let result = (|| {
             let mut evaluator = crate::eval::Evaluator::new(self, tree, module, limits, Some(object));
             let value = evaluator.call(proc, profile, vec![(None, GenericValue::Object(object))])?;
@@ -1615,7 +2164,7 @@ impl Runtime {
 
             Ok(endpoints)
         })();
-        self.heap.rollback();
+        self.rollback_journal();
 
         result
     }
@@ -1630,25 +2179,28 @@ impl Runtime {
         let profile = self.profile;
         let interacted = feedback.interacted;
         self.ui.begin_frame(dockspace, feedback);
-        self.heap.begin();
+        self.begin_journal();
         let result = {
             let argument = target.map_or(GenericValue::Null, GenericValue::Object);
             let mut evaluator = crate::eval::Evaluator::new(self, tree, module, limits, target);
             evaluator.call(proc, profile, vec![(None, argument)])
         };
 
-        let committed = interacted && result.is_ok() && self.heap.changed();
-        match committed {
-            true => self.heap.commit(),
-            false => self.heap.rollback(),
+        let is_changed =
+            self.heap.changed() || !self.pending_placements.is_marked_empty() || self.ui.has_modular_preview_request();
+        let is_committed = interacted && result.is_ok() && is_changed;
+        match is_committed {
+            true => self.commit_journal(),
+            false => self.rollback_journal(),
         }
 
-        let (commands, rebake) = self.ui.end_frame();
+        let (commands, rebake, modular_preview) = self.ui.end_frame();
 
         result.map(|_| crate::ui::Frame {
             commands,
-            committed,
-            rebake: if committed { rebake } else { Default::default() },
+            committed: is_committed,
+            rebake: if is_committed { rebake } else { Default::default() },
+            modular_preview: modular_preview.filter(|_| is_committed),
         })
     }
 
@@ -1660,7 +2212,7 @@ impl Runtime {
         self.ensure_global().map_err(|fault| fault.entering(module, proc))?;
 
         let profile = self.profile;
-        self.heap.begin();
+        self.begin_journal();
         let result = (|| {
             let mut evaluator = crate::eval::Evaluator::new(self, tree, module, limits, Some(object));
             let value = evaluator.call(proc, profile, vec![(None, GenericValue::Object(object))])?;
@@ -1710,9 +2262,44 @@ impl Runtime {
 
             Ok(highlights)
         })();
-        self.heap.rollback();
+        self.rollback_journal();
 
         result
+    }
+
+    fn placements(
+        &mut self, tree: &ObjectTree, module: &Module, task: ProcId, roots: &[ObjectId], limits: Limits,
+    ) -> Result<HashMap<ObjectId, Placement>, Fault> {
+        self.ensure_global().map_err(|fault| fault.entering(module, task))?;
+
+        let profile = self.profile;
+        self.begin_journal();
+        self.placement = PlacementState::Task {
+            roots: roots.iter().copied().collect(),
+            entries: HashMap::new(),
+        };
+
+        let result = (|| {
+            let entries = roots.iter().map(|root| (GenericValue::Object(*root), None)).collect();
+            let list = self.heap.alloc_list(ListData::new(entries)).map_err(Fault::detached)?;
+
+            crate::eval::Evaluator::new(self, tree, module, limits, None).call(
+                task,
+                profile,
+                vec![(None, GenericValue::List(list))],
+            )
+        })();
+        let state = std::mem::take(&mut self.placement);
+        match &result {
+            Ok(_) => self.heap.rollback(),
+            Err(_) => self.rollback_journal(),
+        }
+
+        result?;
+        match state {
+            PlacementState::Task { entries, .. } => Ok(entries),
+            PlacementState::Idle => Ok(HashMap::new()),
+        }
     }
 
     fn preview(
@@ -1721,7 +2308,7 @@ impl Runtime {
         self.ensure_global().map_err(|fault| fault.entering(module, proc))?;
 
         let profile = self.profile;
-        self.heap.begin();
+        self.begin_journal();
         let (overlays, underlays, icon, icon_state, transform, host_reads) = NAMES.with(|names| {
             (
                 names.overlays.clone(),
@@ -1838,7 +2425,7 @@ impl Runtime {
                 position_sensitive: evaluator.position_sensitive,
             })
         })();
-        self.heap.rollback();
+        self.rollback_journal();
 
         result
     }

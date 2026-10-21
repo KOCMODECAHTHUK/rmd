@@ -161,7 +161,15 @@ impl Session {
             return false;
         }
 
+        let target = self.source_root_under(target).unwrap_or(target);
+
         self.build_delete(target)
+            .is_some_and(|action| self.commit(action, None))
+    }
+
+    pub fn delete_selected_instance(&mut self) -> bool {
+        self.selected_instance()
+            .and_then(|target| self.build_delete(target))
             .is_some_and(|action| self.commit(action, None))
     }
 
@@ -181,11 +189,9 @@ impl Session {
     }
 
     pub fn can_edit_instance(&self, target: PrefabInstanceId) -> bool {
-        self.state.active_document().is_some_and(|document| {
-            document
-                .instance_location(target)
-                .is_some_and(|location| document.allows_edit_at(location.coord))
-        })
+        self.state
+            .active_document()
+            .is_some_and(|document| document.allows_edit_instance(target))
     }
 
     pub fn reorder_instance(&mut self, target: PrefabInstanceId, to_top: bool) -> bool {
@@ -195,7 +201,7 @@ impl Session {
         let Some(location) = document.instance_location(target) else {
             return false;
         };
-        if !document.allows_edit_at(location.coord) {
+        if !document.allows_edit_instance(target) {
             return false;
         }
         let Some(mut tile) = document.placed_tile(location.coord) else {

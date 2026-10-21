@@ -39,6 +39,7 @@ use crate::{
 };
 
 mod hover;
+mod modules;
 mod navigation;
 mod presence;
 mod selection;

@@ -10,6 +10,7 @@ use editor::{
     EditorState,
     document::{DocumentId, PrefabInstanceId},
     frame::{FrameInstances, FrameOptions, TypeVisibility},
+    maploader::preview::ModulePreviewState,
     visual,
 };
 use objtree::TypeId;
@@ -37,6 +38,7 @@ mod highlight;
 mod instance;
 mod issues;
 mod level;
+mod modules;
 mod node;
 mod palette;
 mod panel;
@@ -67,7 +69,17 @@ pub(crate) use self::{
 };
 
 #[derive(Default)]
+enum ModuleBake {
+    #[default]
+    Live,
+    Deferred {
+        pending: HashSet<PrefabInstanceId>,
+    },
+}
+
+#[derive(Default)]
 struct DocumentCache {
+    modules: ModulePreviewState,
     node_types: HashSet<TypeId>,
     instances: FrameInstances,
     revision: u64,
@@ -76,6 +88,7 @@ struct DocumentCache {
     lighting_updates: Vec<render::LightingUpdate>,
     preview: Option<BlockPreviewCache>,
     bake: Option<editor::bake::Bake>,
+    module_bake: ModuleBake,
     // edited while the bake was off growing by a level, replayed when it comes back
     unbaked: Vec<PrefabInstanceId>,
     always_highlights: Vec<PrefabInstanceId>,

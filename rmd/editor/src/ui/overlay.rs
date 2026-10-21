@@ -307,7 +307,7 @@ pub(super) fn draw_placement_preview(
     true
 }
 
-fn placement_preview_bounds(
+pub(super) fn placement_preview_bounds(
     camera: &Controller, viewport_min: [f32; 2], coord: Coord, tile_size: u32, preview: PlacementPreview,
 ) -> OverlayRect {
     let tile_size = tile_size.max(1);
@@ -317,6 +317,19 @@ fn placement_preview_bounds(
     let height = preview.thumbnail.texture.height as f32;
     let top_left = camera.map_to_screen([x, y + height]);
     let bottom_right = camera.map_to_screen([x + width, y]);
+
+    OverlayRect {
+        min: [viewport_min[0] + top_left[0], viewport_min[1] + top_left[1]],
+        max: [viewport_min[0] + bottom_right[0], viewport_min[1] + bottom_right[1]],
+    }
+}
+
+pub(super) fn tile_bounds(camera: &Controller, viewport_min: [f32; 2], coord: Coord, tile_size: u32) -> OverlayRect {
+    let tile_size = tile_size.max(1);
+    let x = coord.x.saturating_sub(1).saturating_mul(tile_size) as f32;
+    let y = coord.y.saturating_sub(1).saturating_mul(tile_size) as f32;
+    let top_left = camera.map_to_screen([x, y + tile_size as f32]);
+    let bottom_right = camera.map_to_screen([x + tile_size as f32, y]);
 
     OverlayRect {
         min: [viewport_min[0] + top_left[0], viewport_min[1] + top_left[1]],

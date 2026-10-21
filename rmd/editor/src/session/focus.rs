@@ -22,16 +22,14 @@ impl Session {
     ) -> Option<PrefabInstanceId> {
         let environment = self.state.environment.as_ref()?;
         let root = root(environment.tree.roots())?;
-        let document = self.state.document(id)?;
-        let tile = document.map.tile_at(coord)?;
+        let map = self.effective_grid(id)?;
+        let tile = map.tile_at(coord)?;
 
-        tile.iter()
-            .zip(document.instance_ids_at(coord))
-            .find_map(|(prefab, owner)| {
-                let id = environment.tree.id_of(&prefab.path)?;
+        tile.iter().zip(map.ids_at(coord)).find_map(|(prefab, owner)| {
+            let id = environment.tree.id_of(&prefab.path)?;
 
-                environment.tree.is_subtype_of(id, root).then_some(*owner)
-            })
+            environment.tree.is_subtype_of(id, root).then_some(*owner)
+        })
     }
 
     pub fn focused_area(&self) -> Option<PrefabInstanceId> {
@@ -61,6 +59,12 @@ impl Session {
             .is_none_or(|document| document.allows_edit_at(coord))
     }
 
+    pub fn can_select_at(&self, coord: Coord) -> bool {
+        self.state
+            .active_document()
+            .is_none_or(|document| document.allows_select_at(coord))
+    }
+
     fn set_focus(&mut self, focus: Option<AreaFocus>) {
         if let Some(document) = self.state.active_document_mut() {
             document.set_focus(focus);
@@ -69,7 +73,11 @@ impl Session {
 
     fn resolve_focus(&self, seed: Coord) -> Option<AreaFocus> {
         let owner = self.area_at(self.state.active()?, seed)?;
-        let prefab = self.state.active_document()?.prefab_instance(owner)?.prefab().clone();
+        let prefab = self
+            .effective_grid(self.state.active()?)?
+            .prefab_instance(owner)?
+            .prefab()
+            .clone();
         let instances = self.instances()?;
         let component = instances.area_component_at(seed)?;
 
