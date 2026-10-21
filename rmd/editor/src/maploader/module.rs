@@ -64,9 +64,9 @@ pub struct LoadedModule {
 }
 
 impl LoadedModule {
-    pub fn new(map: Map) -> Self {
+    pub fn new(map: impl Into<Arc<Map>>) -> Self {
         Self {
-            map: Arc::new(map),
+            map: map.into(),
             anchors: Mutex::default(),
         }
     }
@@ -111,6 +111,9 @@ pub struct ModuleFiles {
 impl ModuleFiles {
     pub fn clear(&mut self) {
         self.entries.clear();
+        for open in self.open.values_mut() {
+            open.module = Arc::new(LoadedModule::new(open.module.map.clone()));
+        }
     }
 
     pub fn load(&mut self, path: &Path) -> Result<Arc<LoadedModule>, ErrorKind> {

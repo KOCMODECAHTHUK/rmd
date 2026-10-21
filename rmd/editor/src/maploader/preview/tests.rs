@@ -885,6 +885,21 @@ fn files_are_cached_by_resolved_path_and_anchors_by_type() {
 }
 
 #[test]
+fn clearing_files_keeps_open_modules_but_forgets_their_anchors() {
+    let fixture = Fixture::new();
+    let path = resolve_module_path(&fixture.directory, "a.dmm").unwrap();
+    let open = open_override();
+    let mut files = ModuleFiles::default();
+    files.set_open(&path, Some(open.clone()));
+
+    files.clear();
+    let reloaded = files.load(&path).unwrap();
+    assert!(!Arc::ptr_eq(&reloaded, &open.module), "the anchors start over");
+    assert!(Arc::ptr_eq(&reloaded.map, &open.module.map));
+    assert_eq!(files.open_module(&path).unwrap().generation, open.generation);
+}
+
+#[test]
 fn root_specs_collects_modules_faults_and_errors_and_skips_invalid_ids() {
     let fixture = Fixture::new();
     let spec = fixture.spec(&["a.dmm"]);
