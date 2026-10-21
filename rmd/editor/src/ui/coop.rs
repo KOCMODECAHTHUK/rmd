@@ -5,16 +5,16 @@ use dmm::Coord;
 use editor::{
     document::{DocumentId, Selection},
     icons::materialdesignicons::ICON_CLOSE,
-    tool::{BlockSelectionMode, Tool},
+    tool::{RegionSelectionMode, Tool},
 };
 use net::{CodebaseId, Comment, CommentId, MAX_COMMENT_LEN, PeerId};
 
 use super::{
     DIAGNOSTIC_WARNING_COLOR,
-    block::{block_selection_bounds, fill_selection, hollow_selection_inner},
     common::{DialogButton, begin_centered_modal, dialog_buttons, dpi},
     dialog::{DIALOG_FIELD_WIDTH, MODAL_FLAGS, SAVE_ERROR_COLOR},
     overlay::{OVERLAY_BG, OverlayRect},
+    region::{fill_selection, hollow_selection_inner, region_selection_bounds},
 };
 use crate::{
     camera::Controller,
@@ -785,14 +785,14 @@ pub(super) fn draw_remote_selections(
                 continue;
             };
 
-            let mode = BlockSelectionMode::from(selection.mode);
+            let mode = RegionSelectionMode::from(selection.mode);
             let selection = Selection {
                 min: Coord::new(selection.min[0], selection.min[1], z),
                 max: Coord::new(selection.max[0], selection.max[1], z),
             };
-            let bounds = block_selection_bounds(camera, viewport.min, selection, tile_size);
+            let bounds = region_selection_bounds(camera, viewport.min, selection, tile_size);
             let inner = hollow_selection_inner(selection, mode)
-                .map(|inner| block_selection_bounds(camera, viewport.min, inner, tile_size));
+                .map(|inner| region_selection_bounds(camera, viewport.min, inner, tile_size));
 
             let mut color = peer_color(peer.info.id);
             color[3] = REMOTE_SELECTION_FILL;

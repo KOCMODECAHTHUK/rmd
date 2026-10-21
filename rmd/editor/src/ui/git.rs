@@ -342,7 +342,7 @@ impl GitPanel {
             .width(tile_width)
             .flags(TableColumnFlags::NO_HIDE)
             .done()
-            .column("Region")
+            .column("Hunk")
             .weight(0.8)
             .done()
             .column("Base")
@@ -406,7 +406,7 @@ impl GitPanel {
                     }
 
                     ui.table_next_column();
-                    ui.text(row.region.to_string());
+                    ui.text(row.hunk.to_string());
 
                     ui.table_next_column();
                     if let Some(conflict) = conflict {
@@ -724,7 +724,7 @@ impl GitPanel {
             .width(tile_width)
             .flags(TableColumnFlags::NO_HIDE)
             .done()
-            .column("Region")
+            .column("Hunk")
             .weight(0.6)
             .done()
             .column("Change")
@@ -787,7 +787,7 @@ impl GitPanel {
                     }
 
                     ui.table_next_column();
-                    ui.text(change.region.to_string());
+                    ui.text(change.hunk.to_string());
 
                     ui.table_next_column();
                     ui.text_colored(opaque(change.kind.color()), change.kind.label());

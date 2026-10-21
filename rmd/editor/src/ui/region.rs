@@ -2,7 +2,7 @@ use dear_imgui_rs::{DragFlags, DrawListMut, Ui};
 use dmm::{Coord, Size};
 use editor::{
     document::{DocumentId, Selection},
-    tool::{BlockSelectionMode, SelectionMask, SelectionPlacement},
+    tool::{RegionSelectionMode, SelectionMask, SelectionPlacement},
 };
 
 use super::{OVERLAY_BG, OverlayRect, common::dpi};
@@ -19,12 +19,12 @@ const BLOCK_STRIPE_LENGTH: f32 = 6.0;
 const BLOCK_STRIPE_SPEED: f32 = 12.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) struct BlockSelectionOptions {
+pub(super) struct RegionSelectionOptions {
     pub(super) full_rectangle: bool,
     pub(super) line_width: i32,
 }
 
-impl Default for BlockSelectionOptions {
+impl Default for RegionSelectionOptions {
     fn default() -> Self {
         Self {
             full_rectangle: true,
@@ -33,36 +33,36 @@ impl Default for BlockSelectionOptions {
     }
 }
 
-impl BlockSelectionOptions {
-    pub(super) fn drawing_mode(self, shift: bool) -> BlockSelectionMode {
+impl RegionSelectionOptions {
+    pub(super) fn drawing_mode(self, shift: bool) -> RegionSelectionMode {
         if shift { self.hollow() } else { self.mode() }
     }
 
-    pub(super) fn mode(self) -> BlockSelectionMode {
+    pub(super) fn mode(self) -> RegionSelectionMode {
         if self.full_rectangle {
-            BlockSelectionMode::Full
+            RegionSelectionMode::Full
         } else {
             self.hollow()
         }
     }
 
-    fn hollow(self) -> BlockSelectionMode {
-        BlockSelectionMode::Hollow {
+    fn hollow(self) -> RegionSelectionMode {
+        RegionSelectionMode::Hollow {
             line_width: self.line_width.max(1) as u32,
         }
     }
 
     pub(super) fn label(self) -> String {
         match self.mode() {
-            BlockSelectionMode::Full => String::from("Full rectangle"),
-            BlockSelectionMode::Hollow { line_width: 1 } => String::from("Border, 1 tile"),
-            BlockSelectionMode::Hollow { line_width } => format!("Border, {line_width} tiles"),
+            RegionSelectionMode::Full => String::from("Full rectangle"),
+            RegionSelectionMode::Hollow { line_width: 1 } => String::from("Border, 1 tile"),
+            RegionSelectionMode::Hollow { line_width } => format!("Border, {line_width} tiles"),
         }
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) struct PendingBlockPlacement {
+pub(super) struct PendingRegionPlacement {
     pub(super) source: Selection,
     pub(super) target: Selection,
     pub(super) placement: SelectionPlacement,
@@ -79,7 +79,7 @@ pub(super) fn restore_rectangle_gesture(session: &mut Session, id: DocumentId, g
         && let Some(document) = session.state.document_mut(id)
     {
         let selection = gesture.start.map(|mask| mask.bounds);
-        let selection_mode = gesture.start.map_or(BlockSelectionMode::Full, |mask| mask.mode);
+        let selection_mode = gesture.start.map_or(RegionSelectionMode::Full, |mask| mask.mode);
         document.set_selection(selection, selection_mode);
     }
 }
@@ -110,8 +110,8 @@ pub(super) fn marching_stripe_offset(ui: &Ui) -> f32 {
 pub(super) fn fill_selection(draw: &DrawListMut<'_>, bounds: OverlayRect, inner: Option<OverlayRect>, color: [f32; 4]) {
     match inner {
         Some(inner) => {
-            for region in ring_regions(bounds, inner) {
-                draw.add_rect(region.min, region.max, color).filled(true).build();
+            for rect in ring_rects(bounds, inner) {
+                draw.add_rect(rect.min, rect.max, color).filled(true).build();
             }
         },
         None => draw.add_rect(bounds.min, bounds.max, color).filled(true).build(),
@@ -119,7 +119,7 @@ pub(super) fn fill_selection(draw: &DrawListMut<'_>, bounds: OverlayRect, inner:
 }
 
 fn draw_marching_border(draw: &DrawListMut<'_>, bounds: OverlayRect, clip: OverlayRect, offset: f32, accent: [f32; 4]) {
-    for (start, end, on_accent) in block_border_segments(bounds, clip, offset) {
+    for (start, end, on_accent) in region_border_segments(bounds, clip, offset) {
         draw.add_line(start, end, if on_accent { accent } else { BLOCK_SELECTION_WHITE })
             .thickness(2.0)
             .build();
@@ -151,7 +151,7 @@ pub(super) fn draw_marching_edge(draw: &DrawListMut<'_>, from: [f32; 2], to: [f3
     }
 }
 
-pub(super) fn block_selection_bounds(
+pub(super) fn region_selection_bounds(
     camera: &Controller, viewport_min: [f32; 2], selection: Selection, tile_size: u32,
 ) -> OverlayRect {
     let tile_size = tile_size.max(1) as f32;
@@ -168,13 +168,13 @@ pub(super) fn block_selection_bounds(
     }
 }
 
-pub(super) fn draw_block_outline(
-    ui: &Ui, session: &Session, camera: &Controller, displayed: Selection, mode: BlockSelectionMode,
+pub(super) fn draw_region_outline(
+    ui: &Ui, session: &Session, camera: &Controller, displayed: Selection, mode: RegionSelectionMode,
     viewport: OverlayRect,
 ) {
-    let bounds = block_selection_bounds(camera, viewport.min, displayed, session.options.tile_size);
+    let bounds = region_selection_bounds(camera, viewport.min, displayed, session.options.tile_size);
     let inner_bounds = hollow_selection_inner(displayed, mode)
-        .map(|inner| block_selection_bounds(camera, viewport.min, inner, session.options.tile_size));
+        .map(|inner| region_selection_bounds(camera, viewport.min, inner, session.options.tile_size));
     let draw = ui.get_window_draw_list();
     draw.with_clip_rect(viewport.min, viewport.max, || {
         let tint = [0.25, 0.85, 0.5, 0.12];
@@ -192,8 +192,8 @@ pub(super) fn draw_block_outline(
             draw_marching_border(&draw, border, viewport, offset, BLOCK_SELECTION_GREEN);
         }
         let mode_label = match mode {
-            BlockSelectionMode::Full => String::from("Full"),
-            BlockSelectionMode::Hollow { line_width } => format!("Border {line_width}"),
+            RegionSelectionMode::Full => String::from("Full"),
+            RegionSelectionMode::Hollow { line_width } => format!("Border {line_width}"),
         };
         let label = format!("{mode_label}: {} x {}", displayed.width(), displayed.height());
         let text_size = ui.calc_text_size(&label);
@@ -212,7 +212,7 @@ pub(super) fn draw_block_outline(
     });
 }
 
-fn ring_regions(bounds: OverlayRect, inner: OverlayRect) -> [OverlayRect; 4] {
+fn ring_rects(bounds: OverlayRect, inner: OverlayRect) -> [OverlayRect; 4] {
     [
         OverlayRect {
             min: bounds.min,
@@ -233,8 +233,8 @@ fn ring_regions(bounds: OverlayRect, inner: OverlayRect) -> [OverlayRect; 4] {
     ]
 }
 
-pub(super) fn hollow_selection_inner(selection: Selection, mode: BlockSelectionMode) -> Option<Selection> {
-    let BlockSelectionMode::Hollow { line_width } = mode else {
+pub(super) fn hollow_selection_inner(selection: Selection, mode: RegionSelectionMode) -> Option<Selection> {
+    let RegionSelectionMode::Hollow { line_width } = mode else {
         return None;
     };
     let line_width = line_width.max(1);
@@ -252,7 +252,7 @@ pub(super) fn hollow_selection_inner(selection: Selection, mode: BlockSelectionM
     (min.x <= max.x && min.y <= max.y).then_some(Selection { min, max })
 }
 
-fn block_border_segments(bounds: OverlayRect, clip: OverlayRect, offset: f32) -> Vec<([f32; 2], [f32; 2], bool)> {
+fn region_border_segments(bounds: OverlayRect, clip: OverlayRect, offset: f32) -> Vec<([f32; 2], [f32; 2], bool)> {
     let width = (bounds.max[0] - bounds.min[0]).max(0.0);
     let height = (bounds.max[1] - bounds.min[1]).max(0.0);
     let perimeter = 2.0 * (width + height);
@@ -279,8 +279,8 @@ fn block_border_segments(bounds: OverlayRect, clip: OverlayRect, offset: f32) ->
                 };
                 let green = stripe.rem_euclid(2) != 0;
                 segments.push((
-                    block_border_point(bounds, part_start),
-                    block_border_point(bounds, part_end),
+                    region_border_point(bounds, part_start),
+                    region_border_point(bounds, part_end),
                     green,
                 ));
                 part_start = part_end;
@@ -328,7 +328,7 @@ fn visible_edge_interval(start: [f32; 2], end: [f32; 2], path_start: f32, clip: 
     }
 }
 
-fn block_border_point(bounds: OverlayRect, distance: f32) -> [f32; 2] {
+fn region_border_point(bounds: OverlayRect, distance: f32) -> [f32; 2] {
     let width = (bounds.max[0] - bounds.min[0]).max(0.0);
     let height = (bounds.max[1] - bounds.min[1]).max(0.0);
     if distance <= width {
@@ -342,12 +342,12 @@ fn block_border_point(bounds: OverlayRect, distance: f32) -> [f32; 2] {
     }
 }
 
-pub(super) fn draw_selection_mode_controls(ui: &Ui, session: &mut Session, options: &mut BlockSelectionOptions) {
+pub(super) fn draw_selection_mode_controls(ui: &Ui, session: &mut Session, options: &mut RegionSelectionOptions) {
     let current = session.selection_mask();
     let mode = current.map_or(options.mode(), |mask| mask.mode);
     let mut next = *options;
-    next.full_rectangle = mode == BlockSelectionMode::Full;
-    if let BlockSelectionMode::Hollow { line_width } = mode {
+    next.full_rectangle = mode == RegionSelectionMode::Full;
+    if let RegionSelectionMode::Hollow { line_width } = mode {
         next.line_width = line_width.min(i32::MAX as u32) as i32;
     }
     let mut changed = false;
@@ -371,7 +371,7 @@ pub(super) fn draw_selection_mode_controls(ui: &Ui, session: &mut Session, optio
     }
     if changed {
         if current.is_none_or(|mask| {
-            session.try_select_block(SelectionMask {
+            session.try_select_region(SelectionMask {
                 bounds: mask.bounds,
                 mode: next.mode(),
             })
@@ -386,15 +386,15 @@ pub(super) fn draw_selection_mode_controls(ui: &Ui, session: &mut Session, optio
 #[cfg(test)]
 mod tests {
     use dmm::Coord;
-    use editor::{document::Selection, tool::BlockSelectionMode};
+    use editor::{document::Selection, tool::RegionSelectionMode};
 
     use super::{
-        BlockSelectionOptions, block_border_segments, block_selection_bounds, hollow_selection_inner, ring_regions,
+        RegionSelectionOptions, hollow_selection_inner, region_border_segments, region_selection_bounds, ring_rects,
     };
     use crate::{camera::Controller, ui::OverlayRect};
 
     #[test]
-    fn block_selection_bounds_follow_whole_tile_edges() {
+    fn region_selection_bounds_follow_whole_tile_edges() {
         let mut camera = Controller::new();
         camera.resize(64, 64);
         camera.camera.x = 32.0;
@@ -402,7 +402,7 @@ mod tests {
         let selection = Selection::from_drag(Coord::new(1, 1, 1), Coord::new(2, 1, 1));
 
         assert_eq!(
-            block_selection_bounds(&camera, [10.0, 20.0], selection, 32),
+            region_selection_bounds(&camera, [10.0, 20.0], selection, 32),
             OverlayRect {
                 min: [10.0, 52.0],
                 max: [74.0, 84.0],
@@ -411,55 +411,64 @@ mod tests {
     }
 
     #[test]
-    fn block_selection_options_clamp_the_line_width_and_label_the_active_mode() {
-        let mut options = BlockSelectionOptions::default();
-        assert_eq!(options.mode(), BlockSelectionMode::Full);
+    fn region_selection_options_clamp_the_line_width_and_label_the_active_mode() {
+        let mut options = RegionSelectionOptions::default();
+        assert_eq!(options.mode(), RegionSelectionMode::Full);
         assert_eq!(options.label(), "Full rectangle");
-        assert_eq!(options.drawing_mode(true), BlockSelectionMode::Hollow { line_width: 1 });
+        assert_eq!(
+            options.drawing_mode(true),
+            RegionSelectionMode::Hollow { line_width: 1 }
+        );
         assert_eq!(options.drawing_mode(false), options.mode());
 
         // the width stays configured while the full rectangle is selected, and is ignored
         options.line_width = 4;
-        assert_eq!(options.mode(), BlockSelectionMode::Full);
-        assert_eq!(options.drawing_mode(true), BlockSelectionMode::Hollow { line_width: 4 });
+        assert_eq!(options.mode(), RegionSelectionMode::Full);
+        assert_eq!(
+            options.drawing_mode(true),
+            RegionSelectionMode::Hollow { line_width: 4 }
+        );
 
         options.full_rectangle = false;
-        assert_eq!(options.mode(), BlockSelectionMode::Hollow { line_width: 4 });
+        assert_eq!(options.mode(), RegionSelectionMode::Hollow { line_width: 4 });
         assert_eq!(options.label(), "Border, 4 tiles");
 
         options.line_width = 1;
-        assert_eq!(options.mode(), BlockSelectionMode::Hollow { line_width: 1 });
+        assert_eq!(options.mode(), RegionSelectionMode::Hollow { line_width: 1 });
         assert_eq!(options.label(), "Border, 1 tile");
 
         // the drag widget clamps to one, but a stale or hand-edited value must not wrap round the cast
         for line_width in [0, -1, i32::MIN] {
             options.line_width = line_width;
-            assert_eq!(options.mode(), BlockSelectionMode::Hollow { line_width: 1 });
-            assert_eq!(options.drawing_mode(true), BlockSelectionMode::Hollow { line_width: 1 });
+            assert_eq!(options.mode(), RegionSelectionMode::Hollow { line_width: 1 });
+            assert_eq!(
+                options.drawing_mode(true),
+                RegionSelectionMode::Hollow { line_width: 1 }
+            );
         }
     }
 
     #[test]
-    fn hollow_block_selection_exposes_the_inset_hole() {
+    fn hollow_region_selection_exposes_the_inset_hole() {
         let selection = Selection::from_drag(Coord::new(2, 3, 1), Coord::new(6, 7, 1));
 
-        assert_eq!(hollow_selection_inner(selection, BlockSelectionMode::Full), None);
+        assert_eq!(hollow_selection_inner(selection, RegionSelectionMode::Full), None);
         assert_eq!(
-            hollow_selection_inner(selection, BlockSelectionMode::Hollow { line_width: 1 }),
+            hollow_selection_inner(selection, RegionSelectionMode::Hollow { line_width: 1 }),
             Some(Selection::from_drag(Coord::new(3, 4, 1), Coord::new(5, 6, 1)))
         );
         assert_eq!(
-            hollow_selection_inner(selection, BlockSelectionMode::Hollow { line_width: 2 }),
+            hollow_selection_inner(selection, RegionSelectionMode::Hollow { line_width: 2 }),
             Some(Selection::from_drag(Coord::new(4, 5, 1), Coord::new(4, 5, 1)))
         );
         assert_eq!(
-            hollow_selection_inner(selection, BlockSelectionMode::Hollow { line_width: 3 }),
+            hollow_selection_inner(selection, RegionSelectionMode::Hollow { line_width: 3 }),
             None
         );
     }
 
     #[test]
-    fn ring_regions_cover_the_bounds_around_the_hole() {
+    fn ring_rects_cover_the_bounds_around_the_hole() {
         let bounds = OverlayRect {
             min: [0.0, 0.0],
             max: [10.0, 8.0],
@@ -469,31 +478,28 @@ mod tests {
             max: [7.0, 5.0],
         };
         let area = |rect: OverlayRect| (rect.max[0] - rect.min[0]) * (rect.max[1] - rect.min[1]);
-        let regions = ring_regions(bounds, inner);
+        let rects = ring_rects(bounds, inner);
 
-        assert_eq!(
-            regions.iter().copied().map(area).sum::<f32>(),
-            area(bounds) - area(inner)
-        );
-        for region in regions {
-            assert!(region.min[0] >= bounds.min[0] && region.max[0] <= bounds.max[0]);
-            assert!(region.min[1] >= bounds.min[1] && region.max[1] <= bounds.max[1]);
+        assert_eq!(rects.iter().copied().map(area).sum::<f32>(), area(bounds) - area(inner));
+        for rect in rects {
+            assert!(rect.min[0] >= bounds.min[0] && rect.max[0] <= bounds.max[0]);
+            assert!(rect.min[1] >= bounds.min[1] && rect.max[1] <= bounds.max[1]);
             assert!(
-                region.max[0] <= inner.min[0]
-                    || region.min[0] >= inner.max[0]
-                    || region.max[1] <= inner.min[1]
-                    || region.min[1] >= inner.max[1]
+                rect.max[0] <= inner.min[0]
+                    || rect.min[0] >= inner.max[0]
+                    || rect.max[1] <= inner.min[1]
+                    || rect.min[1] >= inner.max[1]
             );
         }
     }
 
     #[test]
-    fn block_border_stripes_stay_on_each_rectangle_edge() {
+    fn region_border_stripes_stay_on_each_rectangle_edge() {
         let bounds = OverlayRect {
             min: [10.0, 20.0],
             max: [42.0, 68.0],
         };
-        let segments = block_border_segments(bounds, bounds, 3.0);
+        let segments = region_border_segments(bounds, bounds, 3.0);
 
         assert!(!segments.is_empty());
         assert!(segments.iter().any(|(_, _, green)| *green));
@@ -505,7 +511,7 @@ mod tests {
     }
 
     #[test]
-    fn block_border_generation_is_limited_to_visible_edges() {
+    fn region_border_generation_is_limited_to_visible_edges() {
         let bounds = OverlayRect {
             min: [-1_000_000.0, 20.0],
             max: [1_000_000.0, 68.0],
@@ -514,7 +520,7 @@ mod tests {
             min: [0.0, 0.0],
             max: [100.0, 100.0],
         };
-        let segments = block_border_segments(bounds, clip, 0.0);
+        let segments = region_border_segments(bounds, clip, 0.0);
 
         assert!(segments.len() < 40);
         assert!(segments.iter().all(|(start, end, _)| {

@@ -21,7 +21,7 @@ use editor::{
         preview::{ModuleRootPreview, PREVIEW_ID_START},
     },
     progress::Progress,
-    tool::{BlockSelectionMode, SelectionMask, SelectionPlacement, SelectionRotation, Tool},
+    tool::{RegionSelectionMode, SelectionMask, SelectionPlacement, SelectionRotation, Tool},
 };
 
 use crate::{
@@ -638,16 +638,16 @@ fn covered_tiles_reject_edits_but_undo_still_applies() -> TestResult {
 fn mask(from: u32, to: u32) -> SelectionMask {
     SelectionMask {
         bounds: Selection::from_drag(coord(from), coord(to)),
-        mode: BlockSelectionMode::Full,
+        mode: RegionSelectionMode::Full,
     }
 }
 
 fn clipboard_paths(session: &Session) -> Vec<Vec<String>> {
-    let block = session.clipboard().expect("clipboard");
+    let region = session.clipboard().expect("clipboard");
 
-    (0..block.width())
+    (0..region.width())
         .map(|x| {
-            block
+            region
                 .tile(x, 0)
                 .map(|tile| tile.iter().map(|prefab| prefab.path.to_string()).collect())
                 .unwrap_or_default()
@@ -718,8 +718,8 @@ fn covered_tiles_can_be_selected_and_copied_but_not_written() -> TestResult {
     let effective = [effective_paths(&session, 2), effective_paths(&session, 3)];
     assert_ne!(effective[0], source_paths(&session, 2));
 
-    assert!(session.try_select_block(mask(2, 3)));
-    assert!(session.copy_selection(BlockSelectionMode::Full));
+    assert!(session.try_select_region(mask(2, 3)));
+    assert!(session.copy_selection(RegionSelectionMode::Full));
     let visible = effective
         .iter()
         .map(|paths| {
@@ -739,17 +739,17 @@ fn covered_tiles_can_be_selected_and_copied_but_not_written() -> TestResult {
     assert!(!session.cut_selection());
     assert!(!session.delete_selection());
     assert!(!session.fill_rect(mask(2, 3)));
-    assert!(!session.place_selected_block_with_mode(
+    assert!(!session.place_selected_region_with_mode(
         coord(5),
         SelectionRotation::Original,
         SelectionPlacement::Move,
-        BlockSelectionMode::Full,
+        RegionSelectionMode::Full,
     ));
-    assert!(!session.place_selected_block_with_mode(
+    assert!(!session.place_selected_region_with_mode(
         coord(5),
         SelectionRotation::Original,
         SelectionPlacement::Copy,
-        BlockSelectionMode::Full,
+        RegionSelectionMode::Full,
     ));
     assert_eq!(session.clipboard().cloned(), clipboard);
     assert_eq!(

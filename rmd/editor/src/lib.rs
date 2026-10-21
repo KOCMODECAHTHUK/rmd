@@ -38,7 +38,7 @@ use net::CodebaseHash;
 use objtree::ObjectTree;
 
 use crate::{
-    clipboard::TileBlock,
+    clipboard::TileRegion,
     document::{DocumentId, MapDocument},
     environment::LoadDiagnostics,
     error::LoadError,
@@ -330,7 +330,7 @@ pub struct EditorState {
     pub tool: Tool,
     pub palette: Option<dmm::Prefab>,
     recent_prefabs: Vec<dmm::Prefab>,
-    clipboard: Option<TileBlock>,
+    clipboard: Option<TileRegion>,
 }
 
 impl Default for EditorState {
@@ -449,12 +449,12 @@ impl EditorState {
         Some((self.environment.as_ref()?, self.active_document()?))
     }
 
-    pub fn clipboard(&self) -> Option<&TileBlock> {
+    pub fn clipboard(&self) -> Option<&TileRegion> {
         self.clipboard.as_ref()
     }
 
-    pub fn set_clipboard(&mut self, block: TileBlock) {
-        self.clipboard = Some(block);
+    pub fn set_clipboard(&mut self, region: TileRegion) {
+        self.clipboard = Some(region);
     }
 
     pub fn recent_prefabs(&self) -> &[dmm::Prefab] {

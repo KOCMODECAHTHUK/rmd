@@ -26,7 +26,7 @@ pub struct Resize {
     pub after: (u32, u32),
 }
 
-/// Block selection on each side of an edit
+/// Region selection on each side of an edit
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SelectionChange {
     pub before: Option<SelectionMask>,

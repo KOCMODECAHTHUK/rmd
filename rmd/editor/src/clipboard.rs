@@ -9,23 +9,23 @@ use crate::{
     frame::HiddenTypes,
     maploader::preview::MapView,
     tool::{
-        BlockSelectionMode, PlacementKind, SelectionRotation, ToolEdit, coord_in_bounds, default_tile_paths,
+        PlacementKind, RegionSelectionMode, SelectionRotation, ToolEdit, coord_in_bounds, default_tile_paths,
         insertion_index, placement_kind, rotate_point, rotate_prefab,
     },
 };
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct TileBlock {
+pub struct TileRegion {
     width: u32,
     height: u32,
-    selection_mode: BlockSelectionMode,
+    selection_mode: RegionSelectionMode,
     /// row major, `tiles[y * width + x]`, `y` ascending = dmm north
     tiles: Vec<Tile>,
     /// A paste leaves these on the destination
     hidden: HiddenTypes,
 }
 
-impl TileBlock {
+impl TileRegion {
     pub fn width(&self) -> u32 {
         self.width
     }
@@ -34,7 +34,7 @@ impl TileBlock {
         self.height
     }
 
-    pub fn selection_mode(&self) -> BlockSelectionMode {
+    pub fn selection_mode(&self) -> RegionSelectionMode {
         self.selection_mode
     }
 
@@ -86,9 +86,9 @@ impl TileBlock {
     }
 }
 
-pub fn copy_block(
-    map: MapView<'_>, selection: Selection, mode: BlockSelectionMode, hidden: HiddenTypes,
-) -> Option<TileBlock> {
+pub fn copy_region(
+    map: MapView<'_>, selection: Selection, mode: RegionSelectionMode, hidden: HiddenTypes,
+) -> Option<TileRegion> {
     if !selection.is_well_formed() {
         return None;
     }
@@ -110,7 +110,7 @@ pub fn copy_block(
         }
     }
 
-    tiles.iter().any(|tile| !tile.is_empty()).then_some(TileBlock {
+    tiles.iter().any(|tile| !tile.is_empty()).then_some(TileRegion {
         width,
         height,
         selection_mode: mode,
@@ -120,28 +120,28 @@ pub fn copy_block(
 }
 
 pub fn placements<'a>(
-    document: &MapDocument, block: &'a TileBlock, min: Coord, rotation: SelectionRotation,
+    document: &MapDocument, region: &'a TileRegion, min: Coord, rotation: SelectionRotation,
 ) -> Option<(Selection, Vec<(Coord, &'a Tile)>)> {
-    let target = block.footprint(min, rotation)?;
+    let target = region.footprint(min, rotation)?;
 
-    can_paste(document, block, min, rotation).then(|| (target, block.destinations(target, rotation).collect()))
+    can_paste(document, region, min, rotation).then(|| (target, region.destinations(target, rotation).collect()))
 }
 
-pub fn can_paste(document: &MapDocument, block: &TileBlock, min: Coord, rotation: SelectionRotation) -> bool {
-    let Some(target) = block.footprint(min, rotation) else {
+pub fn can_paste(document: &MapDocument, region: &TileRegion, min: Coord, rotation: SelectionRotation) -> bool {
+    let Some(target) = region.footprint(min, rotation) else {
         return false;
     };
     let size = document.map.size();
 
-    block
+    region
         .destinations(target, rotation)
         .all(|(coord, _)| coord_in_bounds(coord, size) && document.allows_edit_at(coord))
 }
 
-pub fn paste_block(
-    document: &mut MapDocument, tree: &ObjectTree, block: &TileBlock, min: Coord, rotation: SelectionRotation,
+pub fn paste_region(
+    document: &mut MapDocument, tree: &ObjectTree, region: &TileRegion, min: Coord, rotation: SelectionRotation,
 ) -> Option<(ToolEdit, Selection)> {
-    let (target, placements) = placements(document, block, min, rotation)?;
+    let (target, placements) = placements(document, region, min, rotation)?;
     let staged = placements
         .into_iter()
         .map(|(destination, tile)| {
@@ -163,11 +163,11 @@ pub fn paste_block(
     let mut coords = staged.keys().copied().collect::<Vec<_>>();
     coords.sort_unstable_by_key(|coord| (coord.z, coord.y, coord.x));
 
-    let mut edit = Edit::new("paste block");
+    let mut edit = Edit::new("paste region");
     let mut affected = Vec::new();
     for coord in coords {
         let before = document.placed_tile(coord)?;
-        let after = merge_pasted(tree, &before, staged.remove(&coord)?, &block.hidden);
+        let after = merge_pasted(tree, &before, staged.remove(&coord)?, &region.hidden);
         if before == after {
             continue;
         }
@@ -222,8 +222,8 @@ pub(crate) fn merge_pasted(
 }
 
 /// Removes what is not hidden, leaving the default turf and area behind
-pub fn clear_block(
-    document: &mut MapDocument, tree: &ObjectTree, selection: Selection, mode: BlockSelectionMode,
+pub fn clear_region(
+    document: &mut MapDocument, tree: &ObjectTree, selection: Selection, mode: RegionSelectionMode,
     hidden: &HiddenTypes, label: &str,
 ) -> Option<ToolEdit> {
     if !selection.is_well_formed()
@@ -337,55 +337,55 @@ mod tests {
     }
 
     #[test]
-    fn a_copied_block_keeps_its_tiles_in_row_major_order() {
+    fn a_copied_region_keeps_its_tiles_in_row_major_order() {
         let document = MapDocument::new(map(Size { x: 4, y: 4, z: 1 }), 1);
-        let block = copy_block(
+        let region = copy_region(
             (&document.map).into(),
             selection((2, 2), (3, 4)),
-            BlockSelectionMode::Full,
+            RegionSelectionMode::Full,
             HiddenTypes::default(),
         )
-        .expect("block");
+        .expect("region");
 
-        assert_eq!((block.width(), block.height()), (2, 3));
-        assert_eq!(block.tile(0, 0).expect("tile")[0].path.to_string(), "/turf/t2_2");
-        assert_eq!(block.tile(1, 2).expect("tile")[0].path.to_string(), "/turf/t3_4");
-        assert_eq!(block.filled().count(), 6);
+        assert_eq!((region.width(), region.height()), (2, 3));
+        assert_eq!(region.tile(0, 0).expect("tile")[0].path.to_string(), "/turf/t2_2");
+        assert_eq!(region.tile(1, 2).expect("tile")[0].path.to_string(), "/turf/t3_4");
+        assert_eq!(region.filled().count(), 6);
     }
 
     #[test]
     fn a_hollow_copy_leaves_its_middle_as_a_hole() {
         let document = MapDocument::new(map(Size { x: 5, y: 5, z: 1 }), 1);
-        let block = copy_block(
+        let region = copy_region(
             (&document.map).into(),
             selection((1, 1), (3, 3)),
-            BlockSelectionMode::Hollow { line_width: 1 },
+            RegionSelectionMode::Hollow { line_width: 1 },
             HiddenTypes::default(),
         )
-        .expect("block");
+        .expect("region");
 
-        assert_eq!(block.filled().count(), 8);
-        assert_eq!(block.selection_mode(), BlockSelectionMode::Hollow { line_width: 1 });
-        assert!(block.tile(1, 1).expect("tile").is_empty());
+        assert_eq!(region.filled().count(), 8);
+        assert_eq!(region.selection_mode(), RegionSelectionMode::Hollow { line_width: 1 });
+        assert!(region.tile(1, 1).expect("tile").is_empty());
     }
 
     #[test]
     fn a_copy_leaves_hidden_types_behind() {
         let document = MapDocument::new(map(Size { x: 2, y: 1, z: 1 }), 1);
         let hidden = [TreePath::parse("/area")].into_iter().collect();
-        let block = copy_block(
+        let region = copy_region(
             (&document.map).into(),
             selection((1, 1), (2, 1)),
-            BlockSelectionMode::Full,
+            RegionSelectionMode::Full,
             hidden,
         )
-        .expect("block");
+        .expect("region");
 
         assert_eq!(
-            block.tile(0, 0),
+            region.tile(0, 0),
             Some(&vec![Prefab::new(TreePath::parse("/turf/t1_1"))])
         );
-        assert_eq!(block.filled().count(), 2);
+        assert_eq!(region.filled().count(), 2);
     }
 
     #[test]
@@ -394,19 +394,19 @@ mod tests {
         let mut destination = MapDocument::new(map(Size { x: 2, y: 1, z: 1 }), 1);
         let tree = ObjectTree::default();
         let hidden = [TreePath::parse("/area")].into_iter().collect();
-        let block = copy_block(
+        let region = copy_region(
             (&source.map).into(),
             selection((1, 1), (1, 1)),
-            BlockSelectionMode::Full,
+            RegionSelectionMode::Full,
             hidden,
         )
-        .expect("block");
+        .expect("region");
         let area = destination.placed_tile(Coord::new(2, 1, 1)).expect("tile")[1].clone();
 
-        let (edit, _) = paste_block(
+        let (edit, _) = paste_region(
             &mut destination,
             &tree,
-            &block,
+            &region,
             Coord::new(2, 1, 1),
             SelectionRotation::Original,
         )
@@ -426,37 +426,37 @@ mod tests {
     #[test]
     fn a_quarter_turn_swaps_the_footprint() {
         let document = MapDocument::new(map(Size { x: 4, y: 4, z: 1 }), 1);
-        let block = copy_block(
+        let region = copy_region(
             (&document.map).into(),
             selection((1, 1), (2, 4)),
-            BlockSelectionMode::Full,
+            RegionSelectionMode::Full,
             HiddenTypes::default(),
         )
-        .expect("block");
+        .expect("region");
         let min = Coord::new(1, 1, 1);
 
         assert_eq!(
-            block.footprint(min, SelectionRotation::Original),
+            region.footprint(min, SelectionRotation::Original),
             Some(selection((1, 1), (2, 4)))
         );
         assert_eq!(
-            block.footprint(min, SelectionRotation::Clockwise),
+            region.footprint(min, SelectionRotation::Clockwise),
             Some(selection((1, 1), (4, 2)))
         );
     }
 
     #[test]
-    fn a_block_pasted_into_another_map_reproduces_the_tiles_with_fresh_ids() {
+    fn a_region_pasted_into_another_map_reproduces_the_tiles_with_fresh_ids() {
         let source = MapDocument::new(map(Size { x: 4, y: 4, z: 1 }), 1);
         let mut destination = MapDocument::new(map(Size { x: 4, y: 4, z: 1 }), 1);
         let tree = ObjectTree::default();
-        let block = copy_block(
+        let region = copy_region(
             (&source.map).into(),
             selection((1, 1), (2, 2)),
-            BlockSelectionMode::Full,
+            RegionSelectionMode::Full,
             HiddenTypes::default(),
         )
-        .expect("block");
+        .expect("region");
 
         let before = destination
             .placed_tile(Coord::new(3, 3, 1))
@@ -464,10 +464,10 @@ mod tests {
             .iter()
             .map(PlacedPrefab::id)
             .collect::<Vec<_>>();
-        let (edit, target) = paste_block(
+        let (edit, target) = paste_region(
             &mut destination,
             &tree,
-            &block,
+            &region,
             Coord::new(3, 3, 1),
             SelectionRotation::Original,
         )
@@ -481,7 +481,7 @@ mod tests {
             pasted.iter().all(|placed| !before.contains(&placed.id())),
             "the paste mints its own instance ids"
         );
-        // The map the block came from is untouched.
+        // The map the region came from is untouched.
         assert_eq!(
             source.placed_tile(Coord::new(1, 1, 1)).expect("tile")[0]
                 .prefab()
@@ -496,19 +496,19 @@ mod tests {
         let source = MapDocument::new(map(Size { x: 4, y: 4, z: 1 }), 1);
         let mut destination = MapDocument::new(map(Size { x: 4, y: 4, z: 1 }), 1);
         let tree = ObjectTree::default();
-        let block = copy_block(
+        let region = copy_region(
             (&source.map).into(),
             selection((1, 1), (3, 3)),
-            BlockSelectionMode::Full,
+            RegionSelectionMode::Full,
             HiddenTypes::default(),
         )
-        .expect("block");
+        .expect("region");
 
         assert!(
-            paste_block(
+            paste_region(
                 &mut destination,
                 &tree,
-                &block,
+                &region,
                 Coord::new(3, 3, 1),
                 SelectionRotation::Original
             )
@@ -520,18 +520,18 @@ mod tests {
     fn pasting_a_path_the_tree_does_not_know_still_writes_the_prefab() {
         let mut destination = MapDocument::new(map(Size { x: 2, y: 2, z: 1 }), 1);
         let tree = ObjectTree::default();
-        let block = TileBlock {
+        let region = TileRegion {
             width: 1,
             height: 1,
-            selection_mode: BlockSelectionMode::Full,
+            selection_mode: RegionSelectionMode::Full,
             tiles: vec![vec![Prefab::new(TreePath::parse("/turf/from/another/codebase"))]],
             hidden: HiddenTypes::default(),
         };
 
-        let (edit, _) = paste_block(
+        let (edit, _) = paste_region(
             &mut destination,
             &tree,
-            &block,
+            &region,
             Coord::new(1, 1, 1),
             SelectionRotation::Original,
         )

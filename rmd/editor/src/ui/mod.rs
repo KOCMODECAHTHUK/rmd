@@ -32,7 +32,6 @@ use crate::{
 };
 
 mod blame;
-mod block;
 mod coop;
 mod dialog;
 mod find;
@@ -46,6 +45,7 @@ mod menu;
 mod node;
 mod overlay;
 mod paste;
+mod region;
 mod runtimes;
 mod search;
 mod toolbar;
@@ -55,10 +55,6 @@ mod welcome;
 
 use self::{
     blame::{BlamePopup, blame_tooltip_position, draw_blame_popup},
-    block::{
-        BlockSelectionOptions, PendingBlockPlacement, RectangleGesture, draw_block_outline, draw_marching_edge,
-        draw_selection_mode_controls, marching_stripe_offset, rectangle_drag_coord, restore_rectangle_gesture,
-    },
     dialog::{
         DeleteLevelDialog, FILL_LIMIT_WARNING_POPUP, FillWarningContext, GO_TO_POPUP, GoToDialog, NEW_MAP_POPUP,
         NewLevelDialog, NewMapDialog, PendingFillWarning, RESIZE_MAP_POPUP, ResizeMapDialog, SAVE_ERROR_COLOR,
@@ -76,6 +72,10 @@ use self::{
         draw_identical_outlines, draw_overlay_underlay, draw_placement_preview, overlay_padding,
     },
     paste::centered_paste_min,
+    region::{
+        PendingRegionPlacement, RectangleGesture, RegionSelectionOptions, draw_marching_edge, draw_region_outline,
+        draw_selection_mode_controls, marching_stripe_offset, rectangle_drag_coord, restore_rectangle_gesture,
+    },
     search::{MAX_CUSTOM_FILL_SEARCH_RESULTS, draw_type_path_search},
     toolbar::{DEFAULT_CUSTOM_FILL_BOUNDARY, TopOverlayState, draw_top_overlay, request_level_change},
     tooltip::{draw_conflict_tooltip, draw_diff_tooltip},
@@ -242,7 +242,7 @@ pub struct UiState {
     placement_stroke: Option<PlacementStroke>,
     pick_stroke: Option<PickStroke>,
     momentary_tool: Option<MomentaryTool>,
-    block_selection_options: BlockSelectionOptions,
+    region_selection_options: RegionSelectionOptions,
     fill_mode: FillMode,
     custom_fill_boundaries: Vec<TreePath>,
     custom_fill_search: String,
@@ -324,7 +324,7 @@ impl UiState {
             placement_stroke: None,
             pick_stroke: None,
             momentary_tool: None,
-            block_selection_options: BlockSelectionOptions::default(),
+            region_selection_options: RegionSelectionOptions::default(),
             fill_mode: FillMode::default(),
             custom_fill_boundaries: vec![TreePath::parse(DEFAULT_CUSTOM_FILL_BOUNDARY)],
             custom_fill_search: String::new(),
@@ -1088,7 +1088,7 @@ mod tests {
     use editor::tool::FillMode;
 
     use super::{
-        BlockSelectionOptions, DEFAULT_CUSTOM_FILL_BOUNDARY, IMGUI_CONTEXT, UiState, common::button_width,
+        DEFAULT_CUSTOM_FILL_BOUNDARY, IMGUI_CONTEXT, RegionSelectionOptions, UiState, common::button_width,
         fixtures::rectangle_context, git, menu::MenuActions,
     };
     use crate::{
@@ -1102,7 +1102,7 @@ mod tests {
         let state = UiState::new(false).expect("valid window keys");
 
         assert_eq!(state.layout.validate(), Ok(()));
-        assert_eq!(state.block_selection_options, BlockSelectionOptions::default());
+        assert_eq!(state.region_selection_options, RegionSelectionOptions::default());
         assert_eq!(state.fill_mode, FillMode::Wall);
         assert_eq!(
             state.custom_fill_boundaries,

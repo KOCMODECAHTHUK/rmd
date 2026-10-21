@@ -33,7 +33,7 @@ pub struct ConflictData {
 
 /// Connected unresolved tiles on one level
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Region {
+pub struct Hunk {
     pub tiles: Vec<Coord>,
     /// north west corner of the bounding box
     pub anchor: Coord,
@@ -41,8 +41,8 @@ pub struct Region {
     pub max: Coord,
 }
 
-impl Region {
-    /// Stable while the region keeps its tiles
+impl Hunk {
+    /// Stable while the hunk keeps its tiles
     pub fn id(&self) -> u64 {
         let first = self.tiles.first().copied().unwrap_or(self.anchor);
 
@@ -65,7 +65,7 @@ impl Resolved {
 pub struct ConflictRow {
     pub coord: Coord,
     /// 1 based, numbered over every conflict so it holds while tiles get resolved
-    pub region: usize,
+    pub hunk: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -108,11 +108,11 @@ pub fn set_tile(edit: &mut Edit, document: &mut MapDocument, coord: Coord, targe
 }
 
 /// Groups touching tiles, diagonals included, sorted by level then from the north west
-pub fn connected_regions(coords: impl IntoIterator<Item = Coord>) -> Vec<Region> {
+pub fn connected_hunks(coords: impl IntoIterator<Item = Coord>) -> Vec<Hunk> {
     let order = coords.into_iter().collect::<Vec<_>>();
     let open = order.iter().copied().collect::<HashSet<_>>();
     let mut seen = HashSet::new();
-    let mut regions = Vec::new();
+    let mut hunks = Vec::new();
 
     for start in order {
         if !seen.insert(start) {
@@ -151,7 +151,7 @@ pub fn connected_regions(coords: impl IntoIterator<Item = Coord>) -> Vec<Region>
             start.z,
         );
 
-        regions.push(Region {
+        hunks.push(Hunk {
             anchor: Coord::new(min.x, max.y, start.z),
             tiles,
             min,
@@ -159,8 +159,8 @@ pub fn connected_regions(coords: impl IntoIterator<Item = Coord>) -> Vec<Region>
         });
     }
 
-    regions.sort_unstable_by_key(|region| (region.anchor.z, std::cmp::Reverse(region.anchor.y), region.anchor.x));
-    regions
+    hunks.sort_unstable_by_key(|hunk| (hunk.anchor.z, std::cmp::Reverse(hunk.anchor.y), hunk.anchor.x));
+    hunks
 }
 
 impl ConflictState {
@@ -181,21 +181,20 @@ impl ConflictState {
             revision: 0,
         };
         state.rows = state
-            .regions_in(None, &Resolved::default())
+            .hunks_in(None, &Resolved::default())
             .into_iter()
             .enumerate()
-            .flat_map(|(index, region)| {
-                region.tiles.into_iter().map(move |coord| ConflictRow {
-                    coord,
-                    region: index + 1,
-                })
+            .flat_map(|(index, hunk)| {
+                hunk.tiles
+                    .into_iter()
+                    .map(move |coord| ConflictRow { coord, hunk: index + 1 })
             })
             .collect();
 
         state
     }
 
-    /// Every conflict grouped by region, in reading order
+    /// Every conflict grouped by hunk, in reading order
     pub fn rows(&self) -> &[ConflictRow] {
         &self.rows
     }
@@ -292,13 +291,13 @@ impl ConflictState {
         })
     }
 
-    /// Unresolved regions, 8 connected so diagonal neighbours share buttons
-    pub fn regions(&self, z: Option<u32>, history: &History) -> Vec<Region> {
-        self.regions_in(z, &self.resolved(history))
+    /// Unresolved hunks, 8 connected so diagonal neighbours share buttons
+    pub fn hunks(&self, z: Option<u32>, history: &History) -> Vec<Hunk> {
+        self.hunks_in(z, &self.resolved(history))
     }
 
-    pub fn regions_in(&self, z: Option<u32>, resolved: &Resolved) -> Vec<Region> {
-        connected_regions(
+    pub fn hunks_in(&self, z: Option<u32>, resolved: &Resolved) -> Vec<Hunk> {
+        connected_hunks(
             self.unresolved_in(resolved)
                 .filter(|coord| z.is_none_or(|z| coord.z == z)),
         )
@@ -416,12 +415,12 @@ mod tests {
     #[test]
     fn groups_touching_tiles_including_diagonals() {
         let (document, state) = setup(&[(1, 1), (2, 2), (5, 5), (5, 6)]);
-        let regions = state.regions(Some(1), &document.history);
+        let hunks = state.hunks(Some(1), &document.history);
 
-        assert_eq!(regions.len(), 2);
-        assert_eq!(regions[0].tiles.len(), 2);
-        assert_eq!(regions[0].anchor, Coord::new(5, 6, 1));
-        assert_eq!(regions[1].anchor, Coord::new(1, 2, 1));
+        assert_eq!(hunks.len(), 2);
+        assert_eq!(hunks[0].tiles.len(), 2);
+        assert_eq!(hunks[0].anchor, Coord::new(5, 6, 1));
+        assert_eq!(hunks[1].anchor, Coord::new(1, 2, 1));
     }
 
     #[test]
@@ -491,7 +490,7 @@ mod tests {
     }
 
     #[test]
-    fn rows_keep_their_region_numbers_while_tiles_get_resolved() {
+    fn rows_keep_their_hunk_numbers_while_tiles_get_resolved() {
         let (mut document, mut state) = setup(&[(1, 1), (2, 2), (5, 5)]);
         let before = state.rows().to_vec();
 
@@ -499,7 +498,7 @@ mod tests {
 
         assert_eq!(state.rows(), before.as_slice());
         assert_eq!(
-            before.iter().map(|row| (row.coord, row.region)).collect::<Vec<_>>(),
+            before.iter().map(|row| (row.coord, row.hunk)).collect::<Vec<_>>(),
             [
                 (Coord::new(5, 5, 1), 1),
                 (Coord::new(2, 2, 1), 2),

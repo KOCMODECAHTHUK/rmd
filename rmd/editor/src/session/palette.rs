@@ -127,7 +127,7 @@ impl Session {
         };
 
         self.state.choose_prefab(prefab);
-        if !matches!(self.state.tool, Tool::Fill | Tool::RectFill | Tool::BlockSelect) {
+        if !matches!(self.state.tool, Tool::Fill | Tool::RectFill | Tool::Select) {
             self.state.tool = Tool::Place;
         }
 
@@ -138,7 +138,7 @@ impl Session {
         if !self.state.choose_recent(index) {
             return false;
         }
-        if !matches!(self.state.tool, Tool::Fill | Tool::RectFill | Tool::BlockSelect) {
+        if !matches!(self.state.tool, Tool::Fill | Tool::RectFill | Tool::Select) {
             self.state.tool = Tool::Place;
         }
 
@@ -295,7 +295,7 @@ mod tests {
     }
 
     #[test]
-    fn palette_choices_preserve_fill_and_block_select_modes() {
+    fn palette_choices_preserve_fill_and_region_select_modes() {
         let root = examples();
         let mut session = Session::new();
         session.load_environment(&root.join("test.dme")).unwrap();
@@ -305,7 +305,7 @@ mod tests {
             .id_of(&TreePath::parse("/turf/open/floor"))
             .unwrap();
 
-        for tool in [Tool::Fill, Tool::RectFill, Tool::BlockSelect] {
+        for tool in [Tool::Fill, Tool::RectFill, Tool::Select] {
             session.set_tool(tool);
             assert!(session.choose_type(floor));
             assert_eq!(session.tool(), tool);

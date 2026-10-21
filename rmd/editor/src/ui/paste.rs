@@ -22,7 +22,7 @@ mod tests {
     use super::centered_paste_min;
 
     #[test]
-    fn a_pasted_block_lands_centered_on_the_cursor() {
+    fn a_pasted_region_lands_centered_on_the_cursor() {
         let size = Size { x: 20, y: 20, z: 1 };
 
         // An odd extent sits dead centre; an even one leans one tile left/down.
@@ -41,17 +41,17 @@ mod tests {
     }
 
     #[test]
-    fn a_pasted_block_is_nudged_back_inside_the_map() {
+    fn a_pasted_region_is_nudged_back_inside_the_map() {
         let size = Size { x: 10, y: 10, z: 1 };
 
-        // Centring near an edge would hang the block off the map, so it slides
+        // Centring near an edge would hang the region off the map, so it slides
         // back until the whole footprint fits.
         assert_eq!(centered_paste_min(5, 5, Coord::new(1, 1, 1), size), Coord::new(1, 1, 1));
         assert_eq!(
             centered_paste_min(5, 5, Coord::new(10, 10, 1), size),
             Coord::new(6, 6, 1)
         );
-        // A block larger than the map still starts at the origin rather than
+        // A region larger than the map still starts at the origin rather than
         // clamping to nothing.
         assert_eq!(
             centered_paste_min(40, 40, Coord::new(5, 5, 1), size),

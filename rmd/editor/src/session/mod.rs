@@ -20,7 +20,6 @@ use crate::{baker::Baker, git_worker::GitWorker};
 
 mod bake;
 mod blame;
-mod block;
 mod clipboard;
 mod codebase;
 mod coop;
@@ -43,12 +42,13 @@ mod node;
 mod palette;
 mod panel;
 mod preview;
+mod region;
 mod search;
 
 use self::{
-    bake::report_bake_output, block::PendingMove, clipboard::FloatingPaste, diff::DiffState,
-    direction::direction_state, edit::is_reorder_label, highlight::always_highlighted, node::NodeEditState,
-    preview::BlockPreviewCache,
+    bake::report_bake_output, clipboard::FloatingPaste, diff::DiffState, direction::direction_state,
+    edit::is_reorder_label, highlight::always_highlighted, node::NodeEditState, preview::RegionPreviewCache,
+    region::PendingMove,
 };
 pub(crate) use self::{
     bake::{FaultState, RuntimeFault},
@@ -66,7 +66,7 @@ pub(crate) use self::{
     level::validate_level,
     node::NodeOverlay,
     palette::{PrefabThumbnail, prefab_thumbnail_for, prefab_thumbnail_or_missing},
-    preview::{BlockPreviewSource, PlacementPreview},
+    preview::{PlacementPreview, RegionPreviewSource},
 };
 
 #[derive(Default)]
@@ -87,7 +87,7 @@ struct DocumentCache {
     frame_updates: Vec<FrameUpdate>,
     lighting_revision: u64,
     lighting_updates: Vec<render::LightingUpdate>,
-    preview: Option<BlockPreviewCache>,
+    preview: Option<RegionPreviewCache>,
     bake: Option<editor::bake::Bake>,
     module_bake: ModuleBake,
     // edited while the bake was off growing by a level, replayed when it comes back

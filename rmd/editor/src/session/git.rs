@@ -3,7 +3,7 @@ use std::{cell::RefCell, collections::HashMap, sync::Arc};
 use dmm::Coord;
 use editor::{
     command::EditGroupId,
-    conflict::{ConflictRow, ConflictState, Region, Resolved, Side},
+    conflict::{ConflictRow, ConflictState, Hunk, Resolved, Side},
     document::DocumentId,
     git::{CommitInfo, CommitRef, Operation, RepoPath, WebLinks},
     tool::ToolEdit,
@@ -15,21 +15,21 @@ use crate::git_worker::Outcome as GitOutcome;
 /// Each conflict row's resolution, indexed like `ConflictState::rows`
 pub(crate) type ConflictStatus = Arc<[Option<Side>]>;
 
-/// Conflict regions and overlays derived for one point in the history
+/// Conflict hunks and overlays derived for one point in the history
 pub(super) struct ConflictView {
     key: (u64, u64, usize),
     resolved: Resolved,
     unresolved: usize,
     status: ConflictStatus,
-    regions: HashMap<Option<u32>, Arc<[Region]>>,
+    hunks: HashMap<Option<u32>, Arc<[Hunk]>>,
     highlights: HashMap<u32, SharedHighlights>,
 }
 
 impl ConflictView {
-    fn regions(&mut self, conflicts: &ConflictState, z: Option<u32>) -> Arc<[Region]> {
-        self.regions
+    fn hunks(&mut self, conflicts: &ConflictState, z: Option<u32>) -> Arc<[Hunk]> {
+        self.hunks
             .entry(z)
-            .or_insert_with(|| conflicts.regions_in(z, &self.resolved).into())
+            .or_insert_with(|| conflicts.hunks_in(z, &self.resolved).into())
             .clone()
     }
 
@@ -104,7 +104,7 @@ impl GitDocState {
                 unresolved: conflicts.unresolved_in(&resolved).count(),
                 status: conflicts.rows().iter().map(|row| resolved.side(row.coord)).collect(),
                 resolved,
-                regions: HashMap::new(),
+                hunks: HashMap::new(),
                 highlights: HashMap::new(),
             });
         }
@@ -308,9 +308,9 @@ impl Session {
         git.with_conflict_view(cache.map_revision, &document.history, read)
     }
 
-    /// unresolved regions, cached until the history or the resolutions change
-    pub(crate) fn conflict_regions(&self, id: DocumentId, z: Option<u32>) -> Arc<[Region]> {
-        self.with_conflict_view(id, |view, conflicts| view.regions(conflicts, z))
+    /// unresolved hunks, cached until the history or the resolutions change
+    pub(crate) fn conflict_hunks(&self, id: DocumentId, z: Option<u32>) -> Arc<[Hunk]> {
+        self.with_conflict_view(id, |view, conflicts| view.hunks(conflicts, z))
             .unwrap_or_else(|| Arc::new([]))
     }
 
@@ -405,7 +405,7 @@ mod tests {
 
         let (rows, status) = session.conflict_table(id).unwrap();
         assert_eq!(
-            rows.iter().map(|row| (row.coord.x, row.region)).collect::<Vec<_>>(),
+            rows.iter().map(|row| (row.coord.x, row.hunk)).collect::<Vec<_>>(),
             [(1, 1), (3, 2)]
         );
         assert_eq!(status.as_ref(), [None, None]);
@@ -436,15 +436,15 @@ mod tests {
     fn cached_conflict_regions_follow_resolutions_through_undo_and_redo() {
         let mut session = conflicted_session();
         let id = session.state.active().unwrap();
-        assert_eq!(session.conflict_regions(id, Some(1)).len(), 2);
+        assert_eq!(session.conflict_hunks(id, Some(1)).len(), 2);
         assert_eq!(session.unresolved_conflicts(id), 2);
 
         assert!(session.resolve_conflict(id, &[Coord::new(1, 1, 1)], editor::conflict::Side::Theirs));
-        assert_eq!(session.conflict_regions(id, Some(1)).len(), 1);
+        assert_eq!(session.conflict_hunks(id, Some(1)).len(), 1);
         assert_eq!(session.unresolved_conflicts(id), 1);
 
         assert!(session.undo());
-        assert_eq!(session.conflict_regions(id, Some(1)).len(), 2);
+        assert_eq!(session.conflict_hunks(id, Some(1)).len(), 2);
         assert_eq!(session.unresolved_conflicts(id), 2);
 
         assert!(session.redo());

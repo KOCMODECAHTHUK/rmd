@@ -1096,7 +1096,7 @@ mod tests {
     use editor::{
         document::{DocumentId, MapDocument, Selection},
         patch,
-        tool::{BlockSelectionMode, FillMode, SelectionMask, Tool},
+        tool::{FillMode, RegionSelectionMode, SelectionMask, Tool},
     };
     use net::LevelContents;
 
@@ -1590,9 +1590,9 @@ mod tests {
         session.set_tool(Tool::Fill);
         let mask = SelectionMask {
             bounds: Selection::from_drag(Coord::new(2, 2, 1), Coord::new(4, 4, 1)),
-            mode: BlockSelectionMode::Full,
+            mode: RegionSelectionMode::Full,
         };
-        session.try_select_block(mask);
+        session.try_select_region(mask);
         let warning = PendingFillWarning {
             context: FillWarningContext::capture(&session),
             coord: mask.bounds.min,
@@ -1603,12 +1603,12 @@ mod tests {
         assert!(warning.matches(&session, FillMode::Wall, &[]));
         assert!(!warning.matches(&session, FillMode::EntireArea, &[]));
         assert!(!warning.matches(&session, FillMode::Wall, &[TreePath::parse("/obj/window")]));
-        session.try_select_block(SelectionMask {
-            mode: BlockSelectionMode::Hollow { line_width: 1 },
+        session.try_select_region(SelectionMask {
+            mode: RegionSelectionMode::Hollow { line_width: 1 },
             ..mask
         });
         assert!(!warning.matches(&session, FillMode::Wall, &[]));
-        session.try_select_block(mask);
+        session.try_select_region(mask);
         session.state.open_document(MapDocument::new(dmm::Map::new(size), 1));
         assert!(!warning.matches(&session, FillMode::Wall, &[]));
         session.state.set_active(id);

@@ -21,7 +21,7 @@ use crate::{
     grid::{Grid, LevelCells},
     maploader::preview::PREVIEW_ID_START,
     patch,
-    tool::{BlockSelectionMode, PlacementKind, SelectionMask, insertion_index, placement_kind},
+    tool::{PlacementKind, RegionSelectionMode, SelectionMask, insertion_index, placement_kind},
 };
 
 pub fn sanitize_vars(map: &mut Map, tree: &ObjectTree) -> usize {
@@ -79,7 +79,7 @@ pub struct MapDocument {
     pending_write: bool,
     picked_instance: Option<PrefabInstanceId>,
     selection: Option<Selection>,
-    selection_mode: BlockSelectionMode,
+    selection_mode: RegionSelectionMode,
     focus: Option<AreaFocus>,
     generation: u64,
     journal: Option<Journal>,
@@ -262,7 +262,7 @@ impl MapDocument {
             pending_write: false,
             picked_instance: None,
             selection: None,
-            selection_mode: BlockSelectionMode::Full,
+            selection_mode: RegionSelectionMode::Full,
             focus: None,
             generation: 0,
             journal: None,
@@ -627,7 +627,7 @@ impl MapDocument {
         self.apply(edit)
     }
 
-    pub fn set_selection(&mut self, selection: Option<Selection>, selection_mode: BlockSelectionMode) {
+    pub fn set_selection(&mut self, selection: Option<Selection>, selection_mode: RegionSelectionMode) {
         self.selection = selection;
         self.selection_mode = selection_mode;
     }
@@ -1036,7 +1036,7 @@ mod tests {
         command::{Edit, EditGroupId},
         focus::AreaFocus,
         patch,
-        tool::BlockSelectionMode,
+        tool::RegionSelectionMode,
     };
 
     #[test]
@@ -2036,7 +2036,7 @@ mod tests {
             let mut document = level_document();
             assert_eq!(document.append_level(&[]), Some(4));
             let selected = Selection::from_drag(Coord::new(1, 1, 4), Coord::new(2, 2, 4));
-            document.set_selection(Some(selected), BlockSelectionMode::Full);
+            document.set_selection(Some(selected), RegionSelectionMode::Full);
             let original = document.map.clone();
             let path = env::temp_dir().join(format!("rmd-explicit-levels-{}-{format:?}.dmm", process::id()));
             document.start_journal();

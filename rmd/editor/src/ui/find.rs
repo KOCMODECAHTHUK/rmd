@@ -143,7 +143,7 @@ impl FindPanel {
         };
         let bounds = if self.in_selection {
             let Some(selection) = session.selection() else {
-                self.error = Some("Nothing is block selected");
+                self.error = Some("Nothing is region selected");
                 return;
             };
             Some(selection)

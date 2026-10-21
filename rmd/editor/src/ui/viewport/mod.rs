@@ -19,7 +19,7 @@ use self::{
     hover::draw_tile_hover,
     overlays::{banner_contains, draw_recent_prefabs},
     presence::{draw_coop_status, draw_tab_menu, hit_comment, share_presence},
-    selection::{ViewGestures, conflict_controls_contain, prepare_block_preview, sync_gestures},
+    selection::{ViewGestures, conflict_controls_contain, prepare_region_preview, sync_gestures},
     shortcuts::choose_recent_on_key,
     tools::{Clicks, apply_right_click, configure_tool_interaction, draw_node_hit, drive_node_tool, interaction_mode},
 };
@@ -261,14 +261,14 @@ impl UiState {
         for (&id, view) in &mut self.map_views {
             if view.gestures.rectangle_gesture.is_some_and(|gesture| {
                 session.state.active() != Some(id)
-                    || session.tool() != Tool::BlockSelect
+                    || session.tool() != Tool::Select
                     || session
                         .state
                         .document(id)
                         .is_none_or(|document| document.z != gesture.z)
             }) {
                 restore_rectangle_gesture(session, id, &mut view.gestures.rectangle_gesture);
-                view.gestures.block_selection_anchor = None;
+                view.gestures.region_selection_anchor = None;
                 self.gizmo.cancel();
             }
         }
@@ -371,7 +371,7 @@ impl UiState {
             keep_open,
             coop,
         } = draw;
-        session.hide_block_preview(id);
+        session.hide_region_preview(id);
         let Some(document) = session.state.document(id) else {
             return;
         };
@@ -522,7 +522,7 @@ impl UiState {
 
         if session.state.active() != Some(id) && gestures.rectangle_gesture.is_some() {
             restore_rectangle_gesture(session, id, &mut gestures.rectangle_gesture);
-            gestures.block_selection_anchor = None;
+            gestures.region_selection_anchor = None;
             self.gizmo.cancel();
         }
 
@@ -548,10 +548,10 @@ impl UiState {
         if frame
             .gestures
             .rectangle_gesture
-            .is_some_and(|gesture| tool != Tool::BlockSelect || gesture.z != session.z())
+            .is_some_and(|gesture| tool != Tool::Select || gesture.z != session.z())
         {
             restore_rectangle_gesture(session, frame.id, &mut frame.gestures.rectangle_gesture);
-            frame.gestures.block_selection_anchor = None;
+            frame.gestures.region_selection_anchor = None;
             self.gizmo.cancel();
         }
 
@@ -559,7 +559,7 @@ impl UiState {
         self.draw_place_preview(ui, session, settings, frame, tool);
 
         sync_gestures(session, frame.gestures, tool);
-        let conflict_regions = session.conflict_regions(frame.id, Some(session.z()));
+        let conflict_hunks = session.conflict_hunks(frame.id, Some(session.z()));
         let is_gizmo_hot = tool == Tool::Pick
             && self.gizmo.is_handle_hovered(
                 ui,
@@ -578,7 +578,7 @@ impl UiState {
         }
 
         let capture = MouseCapture {
-            is_conflict_controls: conflict_controls_contain(ui, session, frame, &conflict_regions),
+            is_conflict_controls: conflict_controls_contain(ui, session, frame, &conflict_hunks),
             is_banner: banner_contains(ui, session, frame),
             is_blame_popup: is_blame_capturing || module_controls.is_capturing,
             is_escape,
@@ -591,12 +591,12 @@ impl UiState {
         let is_gizmo_capturing = self.draw_tool_gizmo(ui, session, settings, frame, tool, gizmo_view);
         session.set_module_bake_deferred(self.gizmo.is_interacting());
 
-        if tool == Tool::BlockSelect
+        if tool == Tool::Select
             && gizmo_view.hovered
             && !frame.gestures.is_busy()
             && settings.keybindings.get(KeybindAction::Rotate).is_pressed(ui)
         {
-            session.rotate_selected_block();
+            session.rotate_selected_region();
         }
 
         let clicks = Clicks::read(ui);
@@ -629,10 +629,10 @@ impl UiState {
 
         self.drag_rectangle(ui, session, frame, clicks.is_left_down);
         self.drag_fill_rect(ui, session, frame, clicks.is_left_down);
-        self.draw_block_overlays(ui, session, frame, tool, gizmo_view);
+        self.draw_region_overlays(ui, session, frame, tool, gizmo_view);
         self.apply_map_menu(ui, session, settings, frame);
 
-        self.draw_conflict_overlay_controls(ui, session, frame, &conflict_regions);
+        self.draw_conflict_overlay_controls(ui, session, frame, &conflict_hunks);
         self.draw_top_overlays(ui, session, settings, frame);
         draw_recent_prefabs(ui, session, settings, frame);
         configure_tool_interaction(session.tool(), frame.interaction);
@@ -643,7 +643,7 @@ impl UiState {
             self.fill_mode,
             &self.custom_fill_boundaries,
         );
-        prepare_block_preview(session, frame);
+        prepare_region_preview(session, frame);
     }
 
     fn cancel_view_edits(&mut self, session: &mut Session, frame: &mut ViewFrame<'_>) {

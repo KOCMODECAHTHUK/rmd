@@ -1,7 +1,7 @@
 use dear_imgui_rs::Ui;
 use dmm::Coord;
 use editor::{
-    conflict::{Region, Side},
+    conflict::{Hunk, Side},
     document::{DocumentId, Selection},
     maploader::preview::ModuleRootKey,
     tool::{SelectionMask, SelectionPlacement, SelectionRotation, Tool},
@@ -9,21 +9,21 @@ use editor::{
 
 use super::ViewFrame;
 use crate::{
-    gizmo::{BlockDrag, BlockGizmoTarget, GizmoMapView},
+    gizmo::{GizmoMapView, RegionDrag, RegionGizmoTarget},
     pacing::FrameDemand,
-    session::{BlockPreviewSource, Session},
+    session::{RegionPreviewSource, Session},
     ui::{
-        PendingBlockPlacement, RectangleGesture, UiState, conflict_controls_layout, draw_block_outline,
-        draw_conflict_controls, rectangle_drag_coord, restore_rectangle_gesture,
+        PendingRegionPlacement, RectangleGesture, UiState, conflict_controls_layout, draw_conflict_controls,
+        draw_region_outline, rectangle_drag_coord, restore_rectangle_gesture,
     },
 };
 
 #[derive(Debug, Default)]
 pub(in crate::ui) struct ViewGestures {
     pub(in crate::ui) module_popup: Option<(ModuleRootKey, Coord)>,
-    pub(super) block_selection_anchor: Option<Coord>,
+    pub(super) region_selection_anchor: Option<Coord>,
     pub(super) rectangle_gesture: Option<RectangleGesture>,
-    pub(super) block_placement: Option<PendingBlockPlacement>,
+    pub(super) region_placement: Option<PendingRegionPlacement>,
     pub(super) fill_anchor: Option<Coord>,
 }
 
@@ -34,39 +34,39 @@ impl ViewGestures {
         }
 
         restore_rectangle_gesture(session, id, &mut self.rectangle_gesture);
-        self.block_selection_anchor = None;
-        self.block_placement = None;
+        self.region_selection_anchor = None;
+        self.region_placement = None;
         self.fill_anchor = None;
     }
 
     pub(super) const fn is_busy(&self) -> bool {
-        self.rectangle_gesture.is_some() || self.block_placement.is_some() || self.fill_anchor.is_some()
+        self.rectangle_gesture.is_some() || self.region_placement.is_some() || self.fill_anchor.is_some()
     }
 
     pub(super) fn displayed(&self, source: Selection) -> Selection {
-        self.block_placement.map_or(source, |placement| placement.target)
+        self.region_placement.map_or(source, |placement| placement.target)
     }
 }
 
-pub(super) fn shows_block_selection(tool: Tool) -> bool {
-    matches!(tool, Tool::BlockSelect | Tool::Fill)
+pub(super) fn shows_region_selection(tool: Tool) -> bool {
+    matches!(tool, Tool::Select | Tool::Fill)
 }
 
 pub(super) fn sync_gestures(session: &Session, gestures: &mut ViewGestures, tool: Tool) {
-    if tool != Tool::BlockSelect {
+    if tool != Tool::Select {
         // we changed the tool, drop it
-        gestures.block_selection_anchor = None;
-        gestures.block_placement = None;
+        gestures.region_selection_anchor = None;
+        gestures.region_placement = None;
     } else {
         if gestures
-            .block_selection_anchor
+            .region_selection_anchor
             .is_some_and(|anchor| anchor.z != session.z())
         {
             // we changed z level, drop it
-            gestures.block_selection_anchor = None;
+            gestures.region_selection_anchor = None;
         }
 
-        if gestures.block_placement.is_some_and(|placement| {
+        if gestures.region_placement.is_some_and(|placement| {
             let occupied = match placement.placement {
                 SelectionPlacement::Move => placement.target,
                 SelectionPlacement::Copy => placement.source,
@@ -75,7 +75,7 @@ pub(super) fn sync_gestures(session: &Session, gestures: &mut ViewGestures, tool
             Some(occupied) != session.selection()
         }) {
             // current source of placement is changed, drop it (mapper might have pasted from different map)
-            gestures.block_placement = None;
+            gestures.region_placement = None;
         }
     }
 
@@ -84,7 +84,7 @@ pub(super) fn sync_gestures(session: &Session, gestures: &mut ViewGestures, tool
     }
 }
 
-pub(super) fn conflict_controls_contain(ui: &Ui, session: &Session, frame: &ViewFrame<'_>, regions: &[Region]) -> bool {
+pub(super) fn conflict_controls_contain(ui: &Ui, session: &Session, frame: &ViewFrame<'_>, hunks: &[Hunk]) -> bool {
     let theirs_label = session
         .git_state(frame.id)
         .and_then(|git| git.conflicts.as_ref())
@@ -92,11 +92,11 @@ pub(super) fn conflict_controls_contain(ui: &Ui, session: &Session, frame: &View
             conflicts.side_label(Side::Theirs).to_owned()
         });
 
-    regions.iter().any(|region| {
+    hunks.iter().any(|hunk| {
         conflict_controls_layout(
             ui,
             frame.camera,
-            region,
+            hunk,
             session.options.tile_size,
             frame.layout.viewport.min,
             frame.layout.controls_area(),
@@ -106,14 +106,14 @@ pub(super) fn conflict_controls_contain(ui: &Ui, session: &Session, frame: &View
     })
 }
 
-pub(super) fn prepare_block_preview(session: &mut Session, frame: &ViewFrame<'_>) {
-    if let Some(placement) = frame.gestures.block_placement
+pub(super) fn prepare_region_preview(session: &mut Session, frame: &ViewFrame<'_>) {
+    if let Some(placement) = frame.gestures.region_placement
         && placement.placement == SelectionPlacement::Copy
-        && session.tool() == Tool::BlockSelect
+        && session.tool() == Tool::Select
     {
-        session.prepare_block_preview(
+        session.prepare_region_preview(
             frame.id,
-            BlockPreviewSource::Selection(SelectionMask {
+            RegionPreviewSource::Selection(SelectionMask {
                 bounds: placement.source,
                 mode: session.selection_mode(),
             }),
@@ -124,12 +124,12 @@ pub(super) fn prepare_block_preview(session: &mut Session, frame: &ViewFrame<'_>
 }
 
 impl UiState {
-    pub(super) fn draw_block_gizmo(
+    pub(super) fn draw_region_gizmo(
         &mut self, ui: &Ui, session: &mut Session, frame: &mut ViewFrame<'_>, gizmo_view: GizmoMapView,
     ) -> bool {
         let gestures = &mut *frame.gestures;
         let map_size = session.map().map(|map| map.size());
-        if gestures.block_selection_anchor.is_some() {
+        if gestures.region_selection_anchor.is_some() {
             self.gizmo.cancel();
             session.cancel_live_move();
 
@@ -143,10 +143,10 @@ impl UiState {
             return false;
         };
 
-        let response = self.gizmo.draw_block(
+        let response = self.gizmo.draw_region(
             ui,
             frame.camera,
-            BlockGizmoTarget {
+            RegionGizmoTarget {
                 selection: source,
                 map_size: size,
                 tile_size: session.options.tile_size,
@@ -155,25 +155,25 @@ impl UiState {
         );
 
         match response.drag {
-            Some(BlockDrag::Resize) => {
+            Some(RegionDrag::Resize) => {
                 gestures.rectangle_gesture.get_or_insert(RectangleGesture {
                     start: session.selection_mask(),
                     z: session.z(),
                 });
-                session.try_select_block(SelectionMask {
+                session.try_select_region(SelectionMask {
                     bounds: response.selection,
                     mode: session.selection_mode(),
                 });
             },
-            Some(BlockDrag::Move { copy: true, released }) => {
-                gestures.block_placement = (response.selection != source).then_some(PendingBlockPlacement {
+            Some(RegionDrag::Move { copy: true, released }) => {
+                gestures.region_placement = (response.selection != source).then_some(PendingRegionPlacement {
                     source,
                     target: response.selection,
                     placement: SelectionPlacement::Copy,
                 });
                 if released {
-                    if gestures.block_placement.take().is_some() {
-                        session.place_selected_block_with_mode(
+                    if gestures.region_placement.take().is_some() {
+                        session.place_selected_region_with_mode(
                             response.selection.min,
                             SelectionRotation::Original,
                             SelectionPlacement::Copy,
@@ -184,25 +184,25 @@ impl UiState {
                     self.gizmo.cancel();
                 }
             },
-            Some(BlockDrag::Move { copy: false, released }) => {
-                session.move_selected_block_live(response.selection.min);
-                gestures.block_placement = session
+            Some(RegionDrag::Move { copy: false, released }) => {
+                session.move_selected_region_live(response.selection.min);
+                gestures.region_placement = session
                     .pending_move_source()
                     .zip(session.selection())
                     .filter(|(source, target)| source != target)
-                    .map(|(source, target)| PendingBlockPlacement {
+                    .map(|(source, target)| PendingRegionPlacement {
                         source,
                         target,
                         placement: SelectionPlacement::Move,
                     });
                 if released {
                     session.finish_live_move();
-                    gestures.block_placement = None;
+                    gestures.region_placement = None;
                     self.gizmo.cancel();
                 }
             },
             None => {
-                gestures.block_placement = None;
+                gestures.region_placement = None;
                 session.cancel_live_move();
             },
         }
@@ -214,7 +214,7 @@ impl UiState {
         &self, ui: &Ui, session: &mut Session, frame: &mut ViewFrame<'_>, coord: Coord, is_left_clicked: bool,
     ) {
         let gestures = &mut *frame.gestures;
-        if gestures.block_placement.is_some() || !is_left_clicked || !session.can_select_at(coord) {
+        if gestures.region_placement.is_some() || !is_left_clicked || !session.can_select_at(coord) {
             return;
         }
 
@@ -222,29 +222,29 @@ impl UiState {
         gestures.rectangle_gesture = Some(RectangleGesture { start, z: session.z() });
         // clicking outside the selection clears it, dragging draws a new one
         if start.is_some() {
-            session.select_block(None);
-            gestures.block_selection_anchor = Some(coord);
+            session.select_region(None);
+            gestures.region_selection_anchor = Some(coord);
 
             return;
         }
 
-        if session.try_select_block(SelectionMask {
+        if session.try_select_region(SelectionMask {
             bounds: Selection::from_drag(coord, coord),
-            mode: self.block_selection_options.drawing_mode(ui.io().key_shift()),
+            mode: self.region_selection_options.drawing_mode(ui.io().key_shift()),
         }) {
-            gestures.block_selection_anchor = Some(coord);
+            gestures.region_selection_anchor = Some(coord);
         }
     }
 
     pub(super) fn drag_rectangle(&self, ui: &Ui, session: &mut Session, frame: &mut ViewFrame<'_>, is_left_down: bool) {
-        if let Some(anchor) = frame.gestures.block_selection_anchor
+        if let Some(anchor) = frame.gestures.region_selection_anchor
             && let Some(coord) = drag_coord(session, frame, anchor.z)
             && (coord != anchor || session.selection().is_some())
         {
-            session.try_select_block(SelectionMask {
+            session.try_select_region(SelectionMask {
                 bounds: Selection::from_drag(anchor, coord),
                 mode: if is_left_down {
-                    self.block_selection_options.drawing_mode(ui.io().key_shift())
+                    self.region_selection_options.drawing_mode(ui.io().key_shift())
                 } else {
                     session.selection_mode()
                 },
@@ -252,7 +252,7 @@ impl UiState {
         }
 
         if !is_left_down {
-            frame.gestures.block_selection_anchor = None;
+            frame.gestures.region_selection_anchor = None;
             frame.gestures.rectangle_gesture = None;
         }
     }
@@ -280,7 +280,7 @@ impl UiState {
 
         let mask = SelectionMask {
             bounds: Selection::from_drag(anchor, coord),
-            mode: self.block_selection_options.drawing_mode(ui.io().key_shift()),
+            mode: self.region_selection_options.drawing_mode(ui.io().key_shift()),
         };
         if is_left_down {
             if !session.can_fill_rect(mask) {
@@ -291,13 +291,13 @@ impl UiState {
                 });
             }
 
-            draw_block_outline(ui, session, frame.camera, mask.bounds, mask.mode, frame.layout.viewport);
+            draw_region_outline(ui, session, frame.camera, mask.bounds, mask.mode, frame.layout.viewport);
         } else {
             session.fill_rect(mask);
         }
     }
 
-    pub(super) fn draw_block_overlays(
+    pub(super) fn draw_region_overlays(
         &mut self, ui: &Ui, session: &Session, frame: &ViewFrame<'_>, tool: Tool, gizmo_view: GizmoMapView,
     ) {
         let viewport = frame.layout.viewport;
@@ -305,22 +305,22 @@ impl UiState {
             self.raise_demand(FrameDemand::Throttled);
         }
 
-        let Some(source) = session.selection().filter(|_| shows_block_selection(tool)) else {
+        let Some(source) = session.selection().filter(|_| shows_region_selection(tool)) else {
             return;
         };
 
         let displayed = frame.gestures.displayed(source);
-        draw_block_outline(ui, session, frame.camera, displayed, session.selection_mode(), viewport);
+        draw_region_outline(ui, session, frame.camera, displayed, session.selection_mode(), viewport);
         self.raise_demand(FrameDemand::Throttled);
 
-        if tool == Tool::BlockSelect
-            && frame.gestures.block_selection_anchor.is_none()
+        if tool == Tool::Select
+            && frame.gestures.region_selection_anchor.is_none()
             && let Some(map_size) = session.map().map(|map| map.size())
         {
-            self.gizmo.draw_block_overlay(
+            self.gizmo.draw_region_overlay(
                 ui,
                 frame.camera,
-                BlockGizmoTarget {
+                RegionGizmoTarget {
                     selection: displayed,
                     map_size,
                     tile_size: session.options.tile_size,
@@ -331,14 +331,14 @@ impl UiState {
     }
 
     pub(super) fn draw_conflict_overlay_controls(
-        &mut self, ui: &Ui, session: &mut Session, frame: &ViewFrame<'_>, conflict_regions: &[Region],
+        &mut self, ui: &Ui, session: &mut Session, frame: &ViewFrame<'_>, conflict_hunks: &[Hunk],
     ) {
         draw_conflict_controls(
             ui,
             session,
             frame.id,
             frame.camera,
-            conflict_regions,
+            conflict_hunks,
             frame.layout.viewport.min,
             frame.layout.controls_area(),
         );

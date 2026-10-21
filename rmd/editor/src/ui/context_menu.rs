@@ -23,7 +23,7 @@ pub(super) struct Target {
     pub(super) coord: Coord,
     pub(super) atoms: Vec<PrefabInstanceId>,
     pub(super) node: Option<NodeContext>,
-    pub(super) block_selected: bool,
+    pub(super) region_selected: bool,
     pub(super) replace_for: Option<PrefabInstanceId>,
     pub(super) replace_query: String,
 }
@@ -80,19 +80,19 @@ pub(super) fn draw_popup(
             }
         }
 
-        if let Some(region) = session
-            .conflict_regions(target.document, Some(coord.z))
+        if let Some(hunk) = session
+            .conflict_hunks(target.document, Some(coord.z))
             .iter()
-            .find(|region| region.tiles.contains(&coord))
+            .find(|hunk| hunk.tiles.contains(&coord))
         {
             for side in [Side::Ours, Side::Theirs] {
-                if ui.menu_item(format!("Take {} for region", conflicts.side_label(side))) {
-                    action = Some(Action::Conflict(region.tiles.clone(), side));
+                if ui.menu_item(format!("Take {} for hunk", conflicts.side_label(side))) {
+                    action = Some(Action::Conflict(hunk.tiles.clone(), side));
                 }
             }
         }
 
-        if target.block_selected
+        if target.region_selected
             && let Some(selection) = session.selection()
         {
             let coords = session
@@ -117,7 +117,7 @@ pub(super) fn draw_popup(
         && let Some(diff) = session.diff(target.document)
     {
         let mut coords = vec![coord];
-        if target.block_selected
+        if target.region_selected
             && let Some(selection) = session.selection()
         {
             coords = session.selection_mode().tiles(selection).collect();
@@ -227,7 +227,7 @@ pub(super) fn draw_popup(
         action = Some(Action::Delete(coord));
     }
 
-    if target.block_selected {
+    if target.region_selected {
         ui.separator();
 
         let mode = session.selection_mode();
@@ -238,7 +238,7 @@ pub(super) fn draw_popup(
             if ui.menu_item_enabled_selected_no_shortcut(
                 label,
                 false,
-                session.can_transform_selected_block_with_mode(transform, mode),
+                session.can_transform_selected_region_with_mode(transform, mode),
             ) {
                 action = Some(Action::Mirror(transform));
             }
@@ -470,7 +470,7 @@ mod tests {
                 coord,
                 atoms: session.state.active_document().unwrap().instance_ids_at(coord).to_vec(),
                 node: None,
-                block_selected: false,
+                region_selected: false,
                 replace_for: None,
                 replace_query: String::new(),
             };

@@ -131,7 +131,7 @@ impl UiState {
             TopOverlayState {
                 keybindings: settings.keybindings,
                 selection_busy: frame.gestures.is_busy(),
-                block_selection_options: &mut self.block_selection_options,
+                region_selection_options: &mut self.region_selection_options,
                 fill_mode: &mut self.fill_mode,
                 custom_fill_boundaries: &mut self.custom_fill_boundaries,
                 custom_fill_search: &mut self.custom_fill_search,

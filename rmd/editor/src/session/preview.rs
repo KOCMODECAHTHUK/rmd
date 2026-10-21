@@ -5,7 +5,7 @@ use editor::{
     document::{DocumentId, PrefabInstanceId, Selection},
     frame::{self},
     tool::{
-        BlockSelectionMode, SelectionMask, SelectionRotation, Tool, rotate_point, rotate_prefab, rotated_selection_at,
+        RegionSelectionMode, SelectionMask, SelectionRotation, Tool, rotate_point, rotate_prefab, rotated_selection_at,
     },
     visual,
 };
@@ -20,14 +20,14 @@ pub(crate) struct PlacementPreview {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum BlockPreviewSource {
+pub(crate) enum RegionPreviewSource {
     Selection(SelectionMask),
-    Conflict { region: u64, side: Side },
+    Conflict { hunk: u64, side: Side },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) struct BlockPreviewKey {
-    source: BlockPreviewSource,
+pub(super) struct RegionPreviewKey {
+    source: RegionPreviewSource,
     rotation: SelectionRotation,
     pub(super) document_revision: u64,
     texture_revision: u64,
@@ -35,8 +35,8 @@ pub(super) struct BlockPreviewKey {
     show_areas: bool,
 }
 
-pub(super) struct BlockPreviewCache {
-    pub(super) key: BlockPreviewKey,
+pub(super) struct RegionPreviewCache {
+    pub(super) key: RegionPreviewKey,
     pub(super) sprites: Vec<SpriteInstance>,
     pub(super) revision: u64,
     pub(super) destination: Coord,
@@ -49,14 +49,14 @@ const PREVIEW_OWNER: PrefabInstanceId = match PrefabInstanceId::from_raw(1) {
 };
 
 impl Session {
-    pub(crate) fn hide_block_preview(&mut self, id: DocumentId) {
+    pub(crate) fn hide_region_preview(&mut self, id: DocumentId) {
         if let Some(preview) = self.caches.get_mut(&id).and_then(|cache| cache.preview.as_mut()) {
             preview.visible = false;
         }
     }
 
-    pub(crate) fn prepare_block_preview(
-        &mut self, id: DocumentId, source: BlockPreviewSource, destination: Coord, rotation: SelectionRotation,
+    pub(crate) fn prepare_region_preview(
+        &mut self, id: DocumentId, source: RegionPreviewSource, destination: Coord, rotation: SelectionRotation,
     ) {
         let Some(cache) = self.caches.get(&id) else {
             return;
@@ -65,7 +65,7 @@ impl Session {
         if self.state.active() != Some(id) {
             return;
         }
-        let key = BlockPreviewKey {
+        let key = RegionPreviewKey {
             source,
             rotation,
             document_revision: cache.revision,
@@ -77,17 +77,17 @@ impl Session {
         if cache.preview.as_ref().is_none_or(|preview| preview.key != key) {
             let origin = Coord::new(1, 1, destination.z);
             let sprites = match source {
-                BlockPreviewSource::Selection(mask) => rotated_selection_at(mask.bounds, origin, rotation)
+                RegionPreviewSource::Selection(mask) => rotated_selection_at(mask.bounds, origin, rotation)
                     .map_or_else(Vec::new, |target| {
-                        self.block_preview_sprites(mask.bounds, target, rotation, mask.mode)
+                        self.region_preview_sprites(mask.bounds, target, rotation, mask.mode)
                     }),
-                BlockPreviewSource::Conflict { region, side } => self.conflict_preview_sprites(id, region, side),
+                RegionPreviewSource::Conflict { hunk, side } => self.conflict_preview_sprites(id, hunk, side),
             };
             let revision = self.next_preview_revision;
             self.next_preview_revision = revision.wrapping_add(1).max(1);
 
             if let Some(cache) = self.caches.get_mut(&id) {
-                cache.preview = Some(BlockPreviewCache {
+                cache.preview = Some(RegionPreviewCache {
                     key,
                     sprites,
                     revision,
@@ -101,8 +101,8 @@ impl Session {
         }
     }
 
-    pub(crate) fn block_preview_sprites(
-        &self, source: Selection, target: Selection, rotation: SelectionRotation, mode: BlockSelectionMode,
+    pub(crate) fn region_preview_sprites(
+        &self, source: Selection, target: Selection, rotation: SelectionRotation, mode: RegionSelectionMode,
     ) -> Vec<SpriteInstance> {
         let Some(document) = self.state.active_document() else {
             return Vec::new();
@@ -130,7 +130,7 @@ impl Session {
         previews
     }
 
-    fn conflict_preview_sprites(&self, id: DocumentId, region_id: u64, side: Side) -> Vec<SpriteInstance> {
+    fn conflict_preview_sprites(&self, id: DocumentId, hunk_id: u64, side: Side) -> Vec<SpriteInstance> {
         let Some(environment) = self.state.environment.as_ref() else {
             return Vec::new();
         };
@@ -140,20 +140,20 @@ impl Session {
         let Some(conflicts) = self.git_state(id).and_then(|git| git.conflicts.as_ref()) else {
             return Vec::new();
         };
-        let Some(region) = conflicts
-            .regions(Some(document.z), &document.history)
+        let Some(hunk) = conflicts
+            .hunks(Some(document.z), &document.history)
             .into_iter()
-            .find(|region| region.id() == region_id)
+            .find(|hunk| hunk.id() == hunk_id)
         else {
             return Vec::new();
         };
 
         let mut sprites = Vec::new();
-        for coord in &region.tiles {
+        for coord in &hunk.tiles {
             let Some(Some(tile)) = conflicts.side_tile(*coord, side) else {
                 continue;
             };
-            let target = Coord::new(coord.x - region.min.x + 1, coord.y - region.min.y + 1, 1);
+            let target = Coord::new(coord.x - hunk.min.x + 1, coord.y - hunk.min.y + 1, 1);
             for prefab in tile {
                 sprites.extend(self.preview_sprite(
                     environment,

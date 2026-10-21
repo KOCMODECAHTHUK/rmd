@@ -46,11 +46,11 @@ impl Session {
             self.cancel_node_edit();
         }
 
-        if self.state.tool == Tool::BlockSelect && tool != Tool::BlockSelect {
+        if self.state.tool == Tool::Select && tool != Tool::Select {
             self.cancel_live_move();
         }
         self.state.tool = tool;
-        if tool == Tool::BlockSelect
+        if tool == Tool::Select
             && let Some(document) = self.state.active_document_mut()
         {
             document.pick_instance(None);
@@ -332,7 +332,7 @@ impl Session {
         })
     }
 
-    /// Commits a block edit that leaves `after` selected, undo puts the old selection back
+    /// Commits a region edit that leaves `after` selected, undo puts the old selection back
     pub(super) fn commit_selecting(
         &mut self, mut action: ToolEdit, after: SelectionMask, group: Option<EditGroupId>,
     ) -> bool {

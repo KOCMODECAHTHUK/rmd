@@ -325,7 +325,7 @@ pub enum Tool {
     Place,
     Pick,
     Node,
-    BlockSelect,
+    Select,
     Delete,
     Replace,
     Fill,
@@ -680,7 +680,7 @@ mod tests {
                 map: "m".repeat(200),
                 z: u32::MAX,
                 pos: [f32::MAX, f32::MIN],
-                tool: Tool::BlockSelect,
+                tool: Tool::Select,
             })),
         };
 

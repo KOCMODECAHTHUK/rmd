@@ -12,7 +12,7 @@ use dmm::{
 use crate::{
     bake::{HIGHLIGHT_ALWAYS, Highlight, highlight_tiles},
     command::Edit,
-    conflict::{connected_regions, describe_prefab, set_tile},
+    conflict::{connected_hunks, describe_prefab, set_tile},
     document::MapDocument,
     grid::Grid,
 };
@@ -73,10 +73,10 @@ pub struct ChangedTile {
     pub coord: Coord,
     pub kind: ChangeKind,
     /// 1 based, touching changes share one
-    pub region: usize,
+    pub hunk: usize,
 }
 
-/// Every tile that differs between two versions of a map, grouped by region
+/// Every tile that differs between two versions of a map, grouped by hunk
 #[derive(Debug, Clone, Default)]
 pub struct MapDiff {
     changes: Vec<ChangedTile>,
@@ -233,7 +233,7 @@ pub fn diff(from: Option<Version>, to: Option<Version>) -> MapDiff {
         order.sort_unstable_by_key(|coord| (coord.z, std::cmp::Reverse(coord.y), coord.x));
         order
     };
-    for (region, tiles) in connected_regions(order).into_iter().enumerate() {
+    for (hunk, tiles) in connected_hunks(order).into_iter().enumerate() {
         for coord in tiles.tiles {
             let kind = kinds[&coord];
             result.index.insert(coord, result.changes.len());
@@ -241,7 +241,7 @@ pub fn diff(from: Option<Version>, to: Option<Version>) -> MapDiff {
             result.changes.push(ChangedTile {
                 coord,
                 kind,
-                region: region + 1,
+                hunk: hunk + 1,
             });
         }
     }
@@ -492,7 +492,7 @@ mod tests {
     }
 
     #[test]
-    fn touching_changes_share_a_region() {
+    fn touching_changes_share_a_hunk() {
         let old = map((5, 5), &[]);
         let new = map(
             (5, 5),
@@ -502,13 +502,13 @@ mod tests {
                 ((5, 5), &["/turf/wall"]),
             ],
         );
-        let regions = diff(Some(Version::File(&old)), Some(Version::File(&new)))
+        let hunks = diff(Some(Version::File(&old)), Some(Version::File(&new)))
             .changes()
             .iter()
-            .map(|change| (change.coord.x, change.region))
+            .map(|change| (change.coord.x, change.hunk))
             .collect::<Vec<_>>();
 
-        assert_eq!(regions, [(5, 1), (2, 2), (1, 2)]);
+        assert_eq!(hunks, [(5, 1), (2, 2), (1, 2)]);
     }
 
     fn lines(from: Option<&Tile>, to: Option<&Tile>) -> Vec<(LineKind, String)> {

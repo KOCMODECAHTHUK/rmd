@@ -3,7 +3,7 @@ use editor::{
     command::EditGroupId,
     document::{DocumentId, Selection},
     tool::{
-        BlockSelectionMode, SelectionMask, SelectionPlacement, SelectionRotation, SelectionTransform, Tool,
+        RegionSelectionMode, SelectionMask, SelectionPlacement, SelectionRotation, SelectionTransform, Tool,
         fill_selection as build_selection_fill, is_placeable, place_selection_with_mode as build_selection_placement,
         rotated_selection_at, transform_selection_with_mode as build_selection_transform, transformed_selection,
     },
@@ -49,7 +49,7 @@ impl Session {
         self.live_pending_move().map(|pending| pending.source.bounds)
     }
 
-    pub fn move_selected_block_live(&mut self, target_min: Coord) -> bool {
+    pub fn move_selected_region_live(&mut self, target_min: Coord) -> bool {
         let pending = if self.pending_move.is_some() {
             let Some(pending) = self.live_pending_move() else {
                 return false;
@@ -83,7 +83,7 @@ impl Session {
         match pending.state {
             PendingMoveState::Unmoved => self.commit_pending_move(pending, target_min),
             PendingMoveState::Moved { .. } => {
-                // moving from the untouched map puts back whatever the block passed over
+                // moving from the untouched map puts back whatever the region passed over
                 if !self.undo() {
                     return false;
                 }
@@ -110,7 +110,7 @@ impl Session {
                     return false;
                 };
 
-                self.can_place_selected_block_with_mode(
+                self.can_place_selected_region_with_mode(
                     target_min,
                     SelectionRotation::Original,
                     SelectionPlacement::Move,
@@ -122,7 +122,7 @@ impl Session {
 
     fn commit_pending_move(&mut self, pending: PendingMove, target_min: Coord) -> bool {
         let mode = pending.source.mode;
-        if !self.can_place_selected_block_with_mode(
+        if !self.can_place_selected_region_with_mode(
             target_min,
             SelectionRotation::Original,
             SelectionPlacement::Move,
@@ -132,7 +132,7 @@ impl Session {
         }
 
         let group = EditGroupId::new();
-        if !self.commit_block_placement(
+        if !self.commit_region_placement(
             target_min,
             SelectionRotation::Original,
             SelectionPlacement::Move,
@@ -188,15 +188,16 @@ impl Session {
         self.state.active_document()?.selection_mask()
     }
 
-    pub fn selection_mode(&self) -> BlockSelectionMode {
-        self.selection_mask().map_or(BlockSelectionMode::Full, |mask| mask.mode)
+    pub fn selection_mode(&self) -> RegionSelectionMode {
+        self.selection_mask()
+            .map_or(RegionSelectionMode::Full, |mask| mask.mode)
     }
 
     pub(crate) fn edit_revision(&self) -> Option<u64> {
         Some(self.caches.get(&self.state.active()?)?.revision)
     }
 
-    pub fn can_select_block(&self, mask: SelectionMask) -> bool {
+    pub fn can_select_region(&self, mask: SelectionMask) -> bool {
         self.state.active_document().is_some_and(|document| {
             mask.bounds.is_well_formed()
                 && mask.bounds.min.z == document.z
@@ -209,15 +210,17 @@ impl Session {
         })
     }
 
-    pub fn try_select_block(&mut self, mask: SelectionMask) -> bool {
-        self.can_select_block(mask) && self.select_block_with_mode(Some(mask.bounds), mask.mode)
+    pub fn try_select_region(&mut self, mask: SelectionMask) -> bool {
+        self.can_select_region(mask) && self.select_region_with_mode(Some(mask.bounds), mask.mode)
     }
 
-    pub fn select_block(&mut self, selection: Option<Selection>) -> bool {
-        self.select_block_with_mode(selection, BlockSelectionMode::Full)
+    pub fn select_region(&mut self, selection: Option<Selection>) -> bool {
+        self.select_region_with_mode(selection, RegionSelectionMode::Full)
     }
 
-    pub fn select_block_with_mode(&mut self, selection: Option<Selection>, selection_mode: BlockSelectionMode) -> bool {
+    pub fn select_region_with_mode(
+        &mut self, selection: Option<Selection>, selection_mode: RegionSelectionMode,
+    ) -> bool {
         let Some(document) = self.state.active_document_mut() else {
             return false;
         };
@@ -238,11 +241,11 @@ impl Session {
         selection.is_some()
     }
 
-    pub fn place_selected_block_with_mode(
+    pub fn place_selected_region_with_mode(
         &mut self, target_min: Coord, rotation: SelectionRotation, placement: SelectionPlacement,
-        selection_mode: BlockSelectionMode,
+        selection_mode: RegionSelectionMode,
     ) -> bool {
-        if !self.can_place_selected_block_with_mode(target_min, rotation, placement, selection_mode) {
+        if !self.can_place_selected_region_with_mode(target_min, rotation, placement, selection_mode) {
             return false;
         }
 
@@ -254,12 +257,12 @@ impl Session {
             return self.repaste_floating(target_min, floating.rotation);
         }
 
-        self.commit_block_placement(target_min, rotation, placement, selection_mode, None)
+        self.commit_region_placement(target_min, rotation, placement, selection_mode, None)
     }
 
-    fn commit_block_placement(
+    fn commit_region_placement(
         &mut self, target_min: Coord, rotation: SelectionRotation, placement: SelectionPlacement,
-        selection_mode: BlockSelectionMode, group: Option<EditGroupId>,
+        selection_mode: RegionSelectionMode, group: Option<EditGroupId>,
     ) -> bool {
         let hidden = self.hidden_types();
         let built = {
@@ -296,10 +299,11 @@ impl Session {
         )
     }
 
-    pub fn can_place_selected_block_with_mode(
-        &self, target_min: Coord, rotation: SelectionRotation, _placement: SelectionPlacement, mode: BlockSelectionMode,
+    pub fn can_place_selected_region_with_mode(
+        &self, target_min: Coord, rotation: SelectionRotation, _placement: SelectionPlacement,
+        mode: RegionSelectionMode,
     ) -> bool {
-        if self.tool() != Tool::BlockSelect {
+        if self.tool() != Tool::Select {
             return false;
         }
 
@@ -377,17 +381,17 @@ impl Session {
             return false;
         };
 
-        is_placeable(&environment.tree, prefab_id) && self.can_select_block(mask)
+        is_placeable(&environment.tree, prefab_id) && self.can_select_region(mask)
     }
 
-    pub fn rotate_selected_block(&mut self) -> bool {
-        self.transform_selected_block_with_mode(SelectionTransform::RotateClockwise, self.selection_mode())
+    pub fn rotate_selected_region(&mut self) -> bool {
+        self.transform_selected_region_with_mode(SelectionTransform::RotateClockwise, self.selection_mode())
     }
 
-    pub fn transform_selected_block_with_mode(
-        &mut self, transform: SelectionTransform, selection_mode: BlockSelectionMode,
+    pub fn transform_selected_region_with_mode(
+        &mut self, transform: SelectionTransform, selection_mode: RegionSelectionMode,
     ) -> bool {
-        if self.tool() != Tool::BlockSelect || !self.can_transform_selected_block_with_mode(transform, selection_mode) {
+        if self.tool() != Tool::Select || !self.can_transform_selected_region_with_mode(transform, selection_mode) {
             return false;
         }
 
@@ -437,12 +441,12 @@ impl Session {
         )
     }
 
-    pub fn can_transform_selected_block_with_mode(
-        &self, transform: SelectionTransform, mode: BlockSelectionMode,
+    pub fn can_transform_selected_region_with_mode(
+        &self, transform: SelectionTransform, mode: RegionSelectionMode,
     ) -> bool {
         // holy fuck we need a better solution to this, just copy pasting  same shit over and over
 
-        if self.tool() != Tool::BlockSelect {
+        if self.tool() != Tool::Select {
             return false;
         }
 
@@ -484,18 +488,18 @@ mod tests {
     use editor::{
         document::{PrefabInstanceId, Selection},
         tool::{
-            BlockSelectionMode, FillMode, SelectionMask, SelectionPlacement, SelectionRotation, SelectionTransform,
+            FillMode, RegionSelectionMode, SelectionMask, SelectionPlacement, SelectionRotation, SelectionTransform,
             Tool,
         },
     };
 
     use crate::session::{
-        BlockPreviewSource, FillOutcome, Session,
+        FillOutcome, RegionPreviewSource, Session,
         fixtures::{assert_render_cache_matches_rebuild, flat_session, focus_session},
     };
 
     #[test]
-    fn a_block_move_leaves_areas_while_they_are_not_shown() {
+    fn a_region_move_leaves_areas_while_they_are_not_shown() {
         let mut session = flat_session(3, 1);
         let source = Coord::new(1, 1, 1);
         let destination = Coord::new(3, 1, 1);
@@ -523,13 +527,13 @@ mod tests {
         let source_area = area_at(&session, source);
         let destination_area = area_at(&session, destination);
 
-        session.set_tool(Tool::BlockSelect);
-        assert!(session.select_block(Some(Selection::from_drag(source, source))));
-        assert!(session.place_selected_block_with_mode(
+        session.set_tool(Tool::Select);
+        assert!(session.select_region(Some(Selection::from_drag(source, source))));
+        assert!(session.place_selected_region_with_mode(
             destination,
             SelectionRotation::Original,
             SelectionPlacement::Move,
-            BlockSelectionMode::Full,
+            RegionSelectionMode::Full,
         ));
 
         assert_eq!(area_at(&session, source), source_area);
@@ -543,20 +547,20 @@ mod tests {
     }
 
     #[test]
-    fn block_selection_clears_object_selection_and_respects_focus() {
+    fn region_selection_clears_object_selection_and_respects_focus() {
         let mut session = focus_session();
         let inside = Coord::new(1, 1, 1);
         let outside = Coord::new(3, 1, 1);
         let object = session.state.active_document().unwrap().instance_ids_at(inside)[0];
         session.pick_instance(Some(object));
-        session.set_tool(Tool::BlockSelect);
+        session.set_tool(Tool::Select);
         assert_eq!(session.picked_instance(), None);
         session.toggle_focus_at(Some(inside));
 
-        assert!(!session.select_block(Some(Selection::from_drag(inside, outside))));
+        assert!(!session.select_region(Some(Selection::from_drag(inside, outside))));
         assert_eq!(session.selection(), None);
         assert_eq!(session.picked_instance(), None);
-        assert!(session.select_block(Some(Selection::from_drag(inside, Coord::new(2, 1, 1)))));
+        assert!(session.select_region(Some(Selection::from_drag(inside, Coord::new(2, 1, 1)))));
         assert_eq!(
             session.selection(),
             Some(Selection::from_drag(inside, Coord::new(2, 1, 1)))
@@ -566,12 +570,12 @@ mod tests {
     #[test]
     fn resizing_selection_preserves_contents_history_and_the_last_valid_region() {
         let mut session = focus_session();
-        session.set_tool(Tool::BlockSelect);
+        session.set_tool(Tool::Select);
         let mask = SelectionMask {
             bounds: Selection::from_drag(Coord::new(1, 1, 1), Coord::new(1, 1, 1)),
-            mode: BlockSelectionMode::Hollow { line_width: 1 },
+            mode: RegionSelectionMode::Hollow { line_width: 1 },
         };
-        assert!(session.try_select_block(mask));
+        assert!(session.try_select_region(mask));
         session.toggle_focus_at(Some(mask.bounds.min));
         let revision = session.revision();
         let tiles = session.map().unwrap().clone();
@@ -579,8 +583,8 @@ mod tests {
             bounds: Selection::from_drag(mask.bounds.min, Coord::new(2, 1, 1)),
             ..mask
         };
-        assert!(session.try_select_block(expanded));
-        assert!(!session.try_select_block(SelectionMask {
+        assert!(session.try_select_region(expanded));
+        assert!(!session.try_select_region(SelectionMask {
             bounds: Selection::from_drag(mask.bounds.min, Coord::new(3, 1, 1)),
             ..mask
         }));
@@ -592,14 +596,14 @@ mod tests {
 
     #[test]
     fn rectangle_fill_and_bucket_share_the_mask_across_tool_switches_and_undo() {
-        for mode in [BlockSelectionMode::Full, BlockSelectionMode::Hollow { line_width: 1 }] {
+        for mode in [RegionSelectionMode::Full, RegionSelectionMode::Hollow { line_width: 1 }] {
             let mut session = flat_session(7, 7);
             let mask = SelectionMask {
                 bounds: Selection::from_drag(Coord::new(2, 2, 1), Coord::new(6, 6, 1)),
                 mode,
             };
-            session.set_tool(Tool::BlockSelect);
-            assert!(session.try_select_block(mask));
+            session.set_tool(Tool::Select);
+            assert!(session.try_select_region(mask));
             let mut red = Prefab::new(TreePath::parse("/turf/open/floor"));
             red.set_var("color".into(), Value::Text("#ff0000".into()));
             session.state.choose_prefab(red.clone());
@@ -628,29 +632,29 @@ mod tests {
             assert!(!session.undo());
             assert!(session.redo());
             assert!(session.redo());
-            session.set_tool(Tool::BlockSelect);
+            session.set_tool(Tool::Select);
             assert_eq!(session.selection_mask(), Some(mask));
             assert_render_cache_matches_rebuild(&session);
         }
     }
 
     #[test]
-    fn one_tile_block_placements_update_multi_level_render_caches() {
+    fn one_tile_region_placements_update_multi_level_render_caches() {
         for placement in [SelectionPlacement::Move, SelectionPlacement::Copy] {
             let mut session = focus_session();
             let source = Coord::new(1, 1, 1);
             let destination = Coord::new(2, 1, 1);
             let untouched = Coord::new(1, 1, 5);
             let untouched_before = session.map().unwrap().tile_at(untouched).unwrap().clone();
-            session.set_tool(Tool::BlockSelect);
-            assert!(session.select_block(Some(Selection::from_drag(source, source))));
+            session.set_tool(Tool::Select);
+            assert!(session.select_region(Some(Selection::from_drag(source, source))));
             let revision = session.revision();
 
-            assert!(session.place_selected_block_with_mode(
+            assert!(session.place_selected_region_with_mode(
                 destination,
                 SelectionRotation::Original,
                 placement,
-                BlockSelectionMode::Full,
+                RegionSelectionMode::Full,
             ));
 
             assert_eq!(
@@ -678,13 +682,13 @@ mod tests {
             .unwrap();
         assert!(session.choose_type(table));
         let prefab = session.palette().unwrap().clone();
-        session.set_tool(Tool::BlockSelect);
-        assert!(session.select_block(Some(Selection::from_drag(source, source))));
+        session.set_tool(Tool::Select);
+        assert!(session.select_region(Some(Selection::from_drag(source, source))));
         let revision = session.revision();
 
         let mask = |coord| SelectionMask {
             bounds: Selection::from_drag(coord, coord),
-            mode: BlockSelectionMode::Full,
+            mode: RegionSelectionMode::Full,
         };
         assert!(session.can_fill_rect(mask(source)));
         assert!(session.can_fill_rect(mask(destination)));
@@ -722,7 +726,7 @@ mod tests {
 
         assert!(session.fill_rect(SelectionMask {
             bounds: Selection::from_drag(Coord::new(1, 1, 1), Coord::new(5, 5, 1)),
-            mode: BlockSelectionMode::Hollow { line_width: 1 },
+            mode: RegionSelectionMode::Hollow { line_width: 1 },
         }));
 
         let has_prefab = |coord| {
@@ -743,7 +747,7 @@ mod tests {
     }
 
     #[test]
-    fn hollow_block_moves_pass_the_border_mode_through_the_session() {
+    fn hollow_region_moves_pass_the_border_mode_through_the_session() {
         let mut session = flat_session(7, 5);
         let table = session
             .tree()
@@ -757,12 +761,12 @@ mod tests {
         let in_hole = session.place_at(Coord::new(4, 3, 1), None).unwrap();
 
         let selection = Selection::from_drag(Coord::new(1, 1, 1), Coord::new(5, 5, 1));
-        let mode = BlockSelectionMode::Hollow { line_width: 1 };
-        session.set_tool(Tool::BlockSelect);
-        assert!(session.select_block_with_mode(Some(selection), mode));
+        let mode = RegionSelectionMode::Hollow { line_width: 1 };
+        session.set_tool(Tool::Select);
+        assert!(session.select_region_with_mode(Some(selection), mode));
         let revision = session.revision();
 
-        assert!(session.place_selected_block_with_mode(
+        assert!(session.place_selected_region_with_mode(
             Coord::new(3, 1, 1),
             SelectionRotation::Original,
             SelectionPlacement::Move,
@@ -793,20 +797,20 @@ mod tests {
     }
 
     #[test]
-    fn undo_and_redo_move_the_selection_with_block_edits() {
+    fn undo_and_redo_move_the_selection_with_region_edits() {
         let mut session = flat_session(8, 4);
-        session.set_tool(Tool::BlockSelect);
+        session.set_tool(Tool::Select);
         let source = Selection::from_drag(Coord::new(1, 1, 1), Coord::new(2, 1, 1));
-        let border = BlockSelectionMode::Hollow { line_width: 1 };
-        assert!(session.select_block_with_mode(Some(source), border));
+        let border = RegionSelectionMode::Hollow { line_width: 1 };
+        assert!(session.select_region_with_mode(Some(source), border));
         let moved = Selection::from_drag(Coord::new(4, 2, 1), Coord::new(5, 2, 1));
-        assert!(session.place_selected_block_with_mode(
+        assert!(session.place_selected_region_with_mode(
             moved.min,
             SelectionRotation::Original,
             SelectionPlacement::Move,
             border,
         ));
-        assert!(session.rotate_selected_block());
+        assert!(session.rotate_selected_region());
         let rotated = session.selection().unwrap();
         assert_ne!(rotated, moved);
 
@@ -825,8 +829,8 @@ mod tests {
         assert!(session.redo());
         assert_eq!(session.selection(), Some(rotated));
 
-        assert!(session.copy_selection(BlockSelectionMode::Full));
-        session.select_block(None);
+        assert!(session.copy_selection(RegionSelectionMode::Full));
+        session.select_region(None);
         let pasted = Selection::from_drag(Coord::new(7, 3, 1), Coord::new(7, 4, 1));
         assert!(session.paste_clipboard(pasted.min, SelectionRotation::Original));
         assert_eq!(session.selection(), Some(pasted));
@@ -837,24 +841,24 @@ mod tests {
     }
 
     #[test]
-    fn hollow_block_previews_ghost_only_the_ring_tiles() {
+    fn hollow_region_previews_ghost_only_the_ring_tiles() {
         let session = flat_session(5, 5);
         let selection = Selection::from_drag(Coord::new(1, 1, 1), Coord::new(5, 5, 1));
 
-        let full = session.block_preview_sprites(
+        let full = session.region_preview_sprites(
             selection,
             selection,
             SelectionRotation::Original,
-            BlockSelectionMode::Full,
+            RegionSelectionMode::Full,
         );
-        let hollow = session.block_preview_sprites(
+        let hollow = session.region_preview_sprites(
             selection,
             selection,
             SelectionRotation::Original,
-            BlockSelectionMode::Hollow { line_width: 1 },
+            RegionSelectionMode::Hollow { line_width: 1 },
         );
 
-        // every tile of the flat map ghosts the same sprites, so the ring is 16/25ths of the whole block
+        // every tile of the flat map ghosts the same sprites, so the ring is 16/25ths of the whole region
         assert!(!full.is_empty());
         assert_eq!(full.len() % 25, 0);
         assert_eq!(hollow.len(), full.len() / 25 * 16);
@@ -873,23 +877,23 @@ mod tests {
         assert!(session.choose_type(table));
         session.set_tool(Tool::Place);
         let placed = session.place_at(Coord::new(1, 1, 2), None).unwrap();
-        session.set_tool(Tool::BlockSelect);
+        session.set_tool(Tool::Select);
 
         (session, placed)
     }
 
     #[test]
-    fn a_block_on_a_created_level_previews_its_ghost() {
+    fn a_region_on_a_created_level_previews_its_ghost() {
         let (mut session, _) = created_level_session();
         let id = session.state.active().unwrap();
         let selection = Selection::from_drag(Coord::new(1, 1, 2), Coord::new(2, 2, 2));
-        assert!(session.select_block(Some(selection)));
+        assert!(session.select_region(Some(selection)));
 
-        session.prepare_block_preview(
+        session.prepare_region_preview(
             id,
-            BlockPreviewSource::Selection(SelectionMask {
+            RegionPreviewSource::Selection(SelectionMask {
                 bounds: selection,
-                mode: BlockSelectionMode::Full,
+                mode: RegionSelectionMode::Full,
             }),
             Coord::new(3, 3, 2),
             SelectionRotation::Clockwise,
@@ -901,19 +905,19 @@ mod tests {
     }
 
     #[test]
-    fn a_block_on_a_lower_level_of_a_loaded_map_previews_its_ghost() {
+    fn a_region_on_a_lower_level_of_a_loaded_map_previews_its_ghost() {
         let mut session = focus_session();
         let id = session.state.active().unwrap();
         session.set_level(3);
-        session.set_tool(Tool::BlockSelect);
+        session.set_tool(Tool::Select);
         let selection = Selection::from_drag(Coord::new(1, 1, 3), Coord::new(2, 1, 3));
-        assert!(session.select_block(Some(selection)));
+        assert!(session.select_region(Some(selection)));
 
-        session.prepare_block_preview(
+        session.prepare_region_preview(
             id,
-            BlockPreviewSource::Selection(SelectionMask {
+            RegionPreviewSource::Selection(SelectionMask {
                 bounds: selection,
-                mode: BlockSelectionMode::Full,
+                mode: RegionSelectionMode::Full,
             }),
             Coord::new(3, 1, 3),
             SelectionRotation::Original,
@@ -923,7 +927,7 @@ mod tests {
     }
 
     #[test]
-    fn a_block_on_a_created_level_moves_rotates_and_cuts() {
+    fn a_region_on_a_created_level_moves_rotates_and_cuts() {
         let (mut session, table) = created_level_session();
         let location = |session: &Session| {
             session
@@ -933,19 +937,19 @@ mod tests {
                 .instance_location(table)
                 .map(|location| location.coord)
         };
-        assert!(session.select_block(Some(Selection::from_drag(Coord::new(1, 1, 2), Coord::new(2, 1, 2)))));
+        assert!(session.select_region(Some(Selection::from_drag(Coord::new(1, 1, 2), Coord::new(2, 1, 2)))));
 
-        assert!(session.place_selected_block_with_mode(
+        assert!(session.place_selected_region_with_mode(
             Coord::new(2, 2, 2),
             SelectionRotation::Original,
             SelectionPlacement::Move,
-            BlockSelectionMode::Full,
+            RegionSelectionMode::Full,
         ));
         assert_eq!(location(&session), Some(Coord::new(2, 2, 2)));
         assert_render_cache_matches_rebuild(&session);
 
         assert!(
-            session.transform_selected_block_with_mode(SelectionTransform::RotateClockwise, BlockSelectionMode::Full)
+            session.transform_selected_region_with_mode(SelectionTransform::RotateClockwise, RegionSelectionMode::Full)
         );
         assert_eq!(location(&session).map(|coord| coord.z), Some(2));
         assert_render_cache_matches_rebuild(&session);
@@ -967,8 +971,8 @@ mod tests {
             .state
             .choose_prefab(Prefab::new(TreePath::parse("/obj/structure/table")));
         let table = session.place_at(Coord::new(1, 1, 1), None).unwrap();
-        session.set_tool(Tool::BlockSelect);
-        assert!(session.select_block(Some(Selection::from_drag(Coord::new(1, 1, 1), Coord::new(1, 1, 1)))));
+        session.set_tool(Tool::Select);
+        assert!(session.select_region(Some(Selection::from_drag(Coord::new(1, 1, 1), Coord::new(1, 1, 1)))));
 
         (session, table)
     }
@@ -978,7 +982,7 @@ mod tests {
     }
 
     #[test]
-    fn a_live_block_move_clears_the_source_at_once_and_puts_back_what_it_passes_over() {
+    fn a_live_region_move_clears_the_source_at_once_and_puts_back_what_it_passes_over() {
         let wall = Coord::new(3, 1, 1);
         let (mut session, table) = table_beside_a_wall(wall);
         let before = session.map().unwrap().clone();
@@ -993,11 +997,11 @@ mod tests {
                 .map(|location| location.coord)
         };
 
-        assert!(session.move_selected_block_live(Coord::new(2, 1, 1)));
+        assert!(session.move_selected_region_live(Coord::new(2, 1, 1)));
         assert_eq!(location(&session), Some(Coord::new(2, 1, 1)));
-        assert!(session.move_selected_block_live(wall));
+        assert!(session.move_selected_region_live(wall));
         assert_eq!(location(&session), Some(wall));
-        assert!(session.move_selected_block_live(Coord::new(5, 1, 1)));
+        assert!(session.move_selected_region_live(Coord::new(5, 1, 1)));
         session.finish_live_move();
 
         let document = session.state.active_document().unwrap();
@@ -1008,7 +1012,7 @@ mod tests {
             Some(Selection::from_drag(Coord::new(5, 1, 1), Coord::new(5, 1, 1)))
         );
         assert_eq!(undo_depth(&session), depth + 1);
-        assert_eq!(session.undo_label(), Some("move block"));
+        assert_eq!(session.undo_label(), Some("move region"));
         assert_render_cache_matches_rebuild(&session);
 
         assert!(session.undo());
@@ -1019,19 +1023,19 @@ mod tests {
     }
 
     #[test]
-    fn a_live_block_move_back_to_its_start_or_cancelled_leaves_no_edit() {
+    fn a_live_region_move_back_to_its_start_or_cancelled_leaves_no_edit() {
         let (mut session, _) = table_beside_a_wall(Coord::new(3, 1, 1));
         let source = session.selection();
         let before = session.map().unwrap().clone();
         let depth = undo_depth(&session);
 
-        assert!(session.move_selected_block_live(Coord::new(4, 1, 1)));
-        assert!(session.move_selected_block_live(Coord::new(1, 1, 1)));
+        assert!(session.move_selected_region_live(Coord::new(4, 1, 1)));
+        assert!(session.move_selected_region_live(Coord::new(1, 1, 1)));
         assert_eq!(*session.map().unwrap(), before);
         assert_eq!(undo_depth(&session), depth);
-        assert!(session.move_selected_block_live(Coord::new(4, 1, 1)));
+        assert!(session.move_selected_region_live(Coord::new(4, 1, 1)));
         assert!(
-            !session.move_selected_block_live(Coord::new(7, 1, 1)),
+            !session.move_selected_region_live(Coord::new(7, 1, 1)),
             "a target off the map keeps the last one"
         );
         assert_eq!(

@@ -664,7 +664,7 @@ impl UploadedPreview {
         };
         let sprites = match device
             .allocator
-            .allocate_buffer(&device_buffer_info(size, "block preview sprites"))
+            .allocate_buffer(&device_buffer_info(size, "region preview sprites"))
         {
             Ok(buffer) => buffer,
             Err(error) => {
@@ -1829,7 +1829,7 @@ impl Renderer {
             };
 
             let preview = if view.preview {
-                let name = format!("map view {index} block preview");
+                let name = format!("map view {index} region preview");
                 let sprites = module.declare_buffer_var(&format!("{name} sprites"), Access::HostWrite);
                 let camera = module.declare_bytes_var(&format!("{name} camera"), size_of::<CameraPush>() as u32);
                 let visible = module.declare_buffer_var(&format!("{name} visible indices"), Access::VertexRead);

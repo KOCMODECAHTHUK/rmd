@@ -42,7 +42,7 @@ impl Clicks {
 
 pub(super) fn configure_tool_interaction(tool: Tool, interaction: &mut MapViewInteraction) {
     interaction.mode = match (tool, interaction.mode) {
-        (Tool::Place | Tool::BlockSelect | Tool::Fill | Tool::RectFill, _) => InteractionMode::Place,
+        (Tool::Place | Tool::Select | Tool::Fill | Tool::RectFill, _) => InteractionMode::Place,
         (Tool::Pick | Tool::Replace, InteractionMode::Pick { pick }) => InteractionMode::Pick { pick },
         (Tool::Node, InteractionMode::Node { pick }) => InteractionMode::Node { pick },
         (Tool::Delete, InteractionMode::Delete { pick }) => InteractionMode::Delete { pick },
@@ -51,7 +51,7 @@ pub(super) fn configure_tool_interaction(tool: Tool, interaction: &mut MapViewIn
         (Tool::Delete, _) => InteractionMode::Delete { pick: None },
     };
     match tool {
-        Tool::Place | Tool::BlockSelect | Tool::Fill | Tool::RectFill | Tool::Comment => {
+        Tool::Place | Tool::Select | Tool::Fill | Tool::RectFill | Tool::Comment => {
             interaction.cursor = None;
             interaction.picked = None;
         },
@@ -64,7 +64,7 @@ pub(super) fn configure_tool_interaction(tool: Tool, interaction: &mut MapViewIn
 
 pub(super) fn interaction_mode(tool: Tool) -> InteractionMode {
     match tool {
-        Tool::Place | Tool::BlockSelect | Tool::Fill | Tool::RectFill => InteractionMode::Place,
+        Tool::Place | Tool::Select | Tool::Fill | Tool::RectFill => InteractionMode::Place,
         Tool::Pick | Tool::Replace | Tool::Comment => InteractionMode::Pick { pick: None },
         Tool::Node => InteractionMode::Node { pick: None },
         Tool::Delete => InteractionMode::Delete { pick: None },
@@ -132,7 +132,7 @@ fn apply_context_menu(
         .map(|document| document.instance_ids_at(coord).to_vec())
         .unwrap_or_default();
     let node = node_context_menu(session, frame, node_hit, coord);
-    let is_block_selected = session.tool() == Tool::BlockSelect
+    let is_region_selected = session.tool() == Tool::Select
         && session
             .selection()
             .is_some_and(|selection| session.selection_mode().includes(selection, coord));
@@ -141,7 +141,7 @@ fn apply_context_menu(
         coord,
         atoms,
         node,
-        block_selected: is_block_selected,
+        region_selected: is_region_selected,
         replace_for: None,
         replace_query: String::new(),
     });
@@ -223,7 +223,7 @@ impl UiState {
                     .draw_placement_direction(ui, session, settings, frame.camera, frame.coord, gizmo_view)
                     .captures_mouse
             },
-            Tool::BlockSelect => self.draw_block_gizmo(ui, session, frame, gizmo_view),
+            Tool::Select => self.draw_region_gizmo(ui, session, frame, gizmo_view),
             Tool::Node | Tool::Comment | Tool::Delete | Tool::Replace | Tool::Fill | Tool::RectFill => {
                 self.gizmo.cancel();
 
@@ -284,7 +284,7 @@ impl UiState {
                     ui.open_popup(COMMENT_POPUP);
                 }
             },
-            Tool::BlockSelect => self.start_rectangle(ui, session, frame, coord, clicks.is_left_clicked),
+            Tool::Select => self.start_rectangle(ui, session, frame, coord, clicks.is_left_clicked),
             Tool::Delete | Tool::Replace => self.pick_at(ui, session, frame, coord, pixel, clicks, is_alternate),
             Tool::Fill => self.fill_at(ui, session, coord, clicks.is_left_clicked),
             Tool::RectFill => self.start_fill_rect(session, frame, coord, clicks.is_left_clicked),

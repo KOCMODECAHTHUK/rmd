@@ -12,7 +12,7 @@ const TOOL_KEYS: [(KeybindAction, Tool); 9] = [
     (KeybindAction::PlaceTool, Tool::Place),
     (KeybindAction::PickTool, Tool::Pick),
     (KeybindAction::NodeTool, Tool::Node),
-    (KeybindAction::BlockSelectTool, Tool::BlockSelect),
+    (KeybindAction::SelectTool, Tool::Select),
     (KeybindAction::DeleteTool, Tool::Delete),
     (KeybindAction::ReplaceTool, Tool::Replace),
     (KeybindAction::FillTool, Tool::Fill),

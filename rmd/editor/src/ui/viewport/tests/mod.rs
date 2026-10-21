@@ -10,7 +10,7 @@ use dmm::{Coord, Prefab, PrefabInstanceId, Size};
 use editor::{
     conflict::Side,
     document::{DocumentId, MapDocument, Selection},
-    tool::{BlockSelectionMode, SelectionMask, Tool},
+    tool::{RegionSelectionMode, SelectionMask, Tool},
 };
 use render::{HighlightStyle, InteractionMode, MapViewInteraction, MapViewRect, PickRequest, PlacementFlash};
 
@@ -22,7 +22,7 @@ use super::{
 };
 use crate::{
     camera::Controller,
-    gizmo::{BlockDrag, BlockGizmoTarget, GizmoMapView, GizmoState},
+    gizmo::{GizmoMapView, GizmoState, RegionDrag, RegionGizmoTarget},
     session::{
         LevelChange, Session,
         fixtures::{install_blame, node_map, node_session, node_tile_has_group},
@@ -30,10 +30,10 @@ use crate::{
     settings::{KeyBinding, KeybindAction, KeybindPreset, Settings},
     ui::{
         IMGUI_CONTEXT, RectangleGesture, UiState,
-        block::block_selection_bounds,
         context_menu::NodeContext,
         fixtures::{RectangleUiHarness, rectangle_context},
         inspector::TransformMode,
+        region::region_selection_bounds,
         restore_rectangle_gesture,
     },
 };
@@ -117,8 +117,8 @@ fn a_new_map_view_starts_out_wanting_to_frame_its_map() {
 
     assert!(view.refit);
     assert!(!view.focus);
-    assert!(view.gestures.block_selection_anchor.is_none());
-    assert!(view.gestures.block_placement.is_none());
+    assert!(view.gestures.region_selection_anchor.is_none());
+    assert!(view.gestures.region_placement.is_none());
 }
 
 #[test]
@@ -262,10 +262,10 @@ fn tool_interaction_configures_highlights_and_pick_requests() {
         }
     );
 
-    let mut block = interaction;
-    configure_tool_interaction(Tool::BlockSelect, &mut block);
+    let mut region = interaction;
+    configure_tool_interaction(Tool::Select, &mut region);
     assert_eq!(
-        block,
+        region,
         MapViewInteraction {
             placement_flash: interaction.placement_flash,
             highlight: interaction.highlight,

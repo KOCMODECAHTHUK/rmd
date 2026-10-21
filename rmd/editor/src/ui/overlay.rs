@@ -1,7 +1,7 @@
 use dear_imgui_rs::{DrawListMut, Ui};
 use dmm::Coord;
 use editor::{
-    conflict::{Region, Side},
+    conflict::{Hunk, Side},
     document::DocumentId,
     tool::SelectionRotation,
 };
@@ -13,7 +13,7 @@ use super::{
 };
 use crate::{
     camera::Controller,
-    session::{BlockPreviewSource, GuideBadge, PlacementPreview, Session},
+    session::{GuideBadge, PlacementPreview, RegionPreviewSource, Session},
 };
 
 const OVERLAY_PADDING: f32 = 4.0;
@@ -119,12 +119,12 @@ pub(super) fn draw_highlights(
 }
 
 pub(super) fn conflict_controls_layout(
-    ui: &Ui, camera: &Controller, region: &Region, tile_size: u32, viewport_min: [f32; 2], bounds: OverlayRect,
+    ui: &Ui, camera: &Controller, hunk: &Hunk, tile_size: u32, viewport_min: [f32; 2], bounds: OverlayRect,
     theirs: &str,
 ) -> Option<([f32; 2], OverlayRect)> {
     let tile_size = tile_size.max(1) as f32;
-    let corner = camera.map_to_screen([(region.min.x - 1) as f32 * tile_size, region.max.y as f32 * tile_size]);
-    let far = camera.map_to_screen([region.max.x as f32 * tile_size, (region.min.y - 1) as f32 * tile_size]);
+    let corner = camera.map_to_screen([(hunk.min.x - 1) as f32 * tile_size, hunk.max.y as f32 * tile_size]);
+    let far = camera.map_to_screen([hunk.max.x as f32 * tile_size, (hunk.min.y - 1) as f32 * tile_size]);
     let corner = [viewport_min[0] + corner[0], viewport_min[1] + corner[1]];
     let far = [viewport_min[0] + far[0], viewport_min[1] + far[1]];
     if far[0] < bounds.min[0] || far[1] < bounds.min[1] || corner[0] > bounds.max[0] || corner[1] > bounds.max[1] {
@@ -148,7 +148,7 @@ pub(super) fn conflict_controls_layout(
 }
 
 pub(super) fn draw_conflict_controls(
-    ui: &Ui, session: &mut Session, id: DocumentId, camera: &Controller, regions: &[Region], viewport_min: [f32; 2],
+    ui: &Ui, session: &mut Session, id: DocumentId, camera: &Controller, hunks: &[Hunk], viewport_min: [f32; 2],
     bounds: OverlayRect,
 ) {
     let tile_size = session.options.tile_size;
@@ -166,9 +166,9 @@ pub(super) fn draw_conflict_controls(
         });
 
     let mut choice = None;
-    for region in regions {
+    for hunk in hunks {
         let Some((position, rect)) =
-            conflict_controls_layout(ui, camera, region, tile_size, viewport_min, bounds, &theirs)
+            conflict_controls_layout(ui, camera, hunk, tile_size, viewport_min, bounds, &theirs)
         else {
             continue;
         };
@@ -176,26 +176,26 @@ pub(super) fn draw_conflict_controls(
         draw_overlay_underlay(ui, rect);
 
         ui.set_cursor_screen_pos(position);
-        let key = format!("conflict-{}", region.id());
+        let key = format!("conflict-{}", hunk.id());
         let _id = ui.push_id(&key);
 
         if ui.small_button("HEAD") {
-            choice = Some((region.tiles.clone(), Side::Ours));
+            choice = Some((hunk.tiles.clone(), Side::Ours));
         }
         ui.same_line();
         if ui.small_button(&theirs) {
-            choice = Some((region.tiles.clone(), Side::Theirs));
+            choice = Some((hunk.tiles.clone(), Side::Theirs));
         }
 
         if ui.is_item_hovered() {
             ui.set_item_tooltip(&detail);
-            session.prepare_block_preview(
+            session.prepare_region_preview(
                 id,
-                BlockPreviewSource::Conflict {
-                    region: region.id(),
+                RegionPreviewSource::Conflict {
+                    hunk: hunk.id(),
                     side: Side::Theirs,
                 },
-                region.min,
+                hunk.min,
                 SelectionRotation::Original,
             );
         }

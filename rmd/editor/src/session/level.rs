@@ -420,9 +420,9 @@ mod tests {
     fn changing_levels_keeps_focus_and_selection_on_their_level() {
         let mut session = focus_session();
         session.toggle_focus_at(Some(Coord::new(1, 1, 1)));
-        session.set_tool(Tool::BlockSelect);
+        session.set_tool(Tool::Select);
         let selection = Selection::from_drag(Coord::new(1, 1, 1), Coord::new(2, 1, 1));
-        assert!(session.select_block(Some(selection)));
+        assert!(session.select_region(Some(selection)));
         let focus = session.focused_area();
         assert!(focus.is_some());
         assert!(!session.can_edit_at(Coord::new(4, 1, 1)));

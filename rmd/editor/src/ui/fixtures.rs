@@ -287,7 +287,7 @@ impl RectangleUiHarness {
             ]
         });
         self.conflict_button = None;
-        if let Some(region) = self.session.conflict_regions(self.id, Some(self.session.z())).first() {
+        if let Some(hunk) = self.session.conflict_hunks(self.id, Some(self.session.z())).first() {
             let min = [self.view.rect.x as f32, self.view.rect.y as f32];
             let max = [
                 min[0] + self.view.rect.width as f32,
@@ -300,7 +300,7 @@ impl RectangleUiHarness {
             if let Some((position, _)) = conflict_controls_layout(
                 ui,
                 &self.view.camera,
-                region,
+                hunk,
                 self.session.options.tile_size,
                 min,
                 controls,

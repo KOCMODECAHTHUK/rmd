@@ -380,7 +380,7 @@ mod tests {
         let session = flat_session(4, 3);
         let id = session.state.active().unwrap();
         let tile = session.options.tile_size;
-        let block = |min: (u32, u32), max: (u32, u32)| {
+        let region = |min: (u32, u32), max: (u32, u32)| {
             Some(Selection::from_drag(
                 Coord::new(min.0, min.1, 1),
                 Coord::new(max.0, max.1, 1),
@@ -389,14 +389,14 @@ mod tests {
 
         assert_eq!(session.capture_region(id, None), Some(([0, 0], [4 * tile, 3 * tile])));
         assert_eq!(
-            session.capture_region(id, block((2, 2), (3, 3))),
+            session.capture_region(id, region((2, 2), (3, 3))),
             Some(([tile, tile], [2 * tile, 2 * tile]))
         );
         assert_eq!(
-            session.capture_region(id, block((3, 2), (9, 9))),
+            session.capture_region(id, region((3, 2), (9, 9))),
             Some(([2 * tile, tile], [2 * tile, 2 * tile]))
         );
-        assert_eq!(session.capture_region(id, block((5, 1), (6, 1))), None);
+        assert_eq!(session.capture_region(id, region((5, 1), (6, 1))), None);
     }
 
     #[test]

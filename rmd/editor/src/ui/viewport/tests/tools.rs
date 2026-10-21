@@ -66,7 +66,7 @@ fn right_click_captures_the_clicked_tile_in_every_tool() {
         Tool::Pick,
         Tool::Place,
         Tool::Node,
-        Tool::BlockSelect,
+        Tool::Select,
         Tool::Delete,
         Tool::Fill,
     ] {
@@ -304,10 +304,10 @@ fn edit_menu_commands_reach_the_active_map_view() {
     app.session.set_tool(Tool::Place);
     let coord = Coord::new(5, 8, 1);
     assert!(app.session.place_at(coord, None).is_some());
-    app.session.set_tool(Tool::BlockSelect);
+    app.session.set_tool(Tool::Select);
     assert!(
         app.session
-            .select_block(Some(Selection::from_drag(coord, Coord::new(6, 9, 1))))
+            .select_region(Some(Selection::from_drag(coord, Coord::new(6, 9, 1))))
     );
 
     app.state.edit_command = Some(EditCommand::Copy);
@@ -368,8 +368,8 @@ fn edit_keys_leave_the_map_alone_while_a_modal_is_open() {
     app.key(Key::ModCtrl, false);
     assert!(app.session.map().unwrap().tile_at(coord).unwrap().contains(&table));
 
-    app.session.set_tool(Tool::BlockSelect);
-    assert!(app.session.select_block(Some(Selection::from_drag(coord, coord))));
+    app.session.set_tool(Tool::Select);
+    assert!(app.session.select_region(Some(Selection::from_drag(coord, coord))));
     app.key(Key::Delete, true);
     app.key(Key::Delete, false);
     assert!(app.session.map().unwrap().tile_at(coord).unwrap().contains(&table));

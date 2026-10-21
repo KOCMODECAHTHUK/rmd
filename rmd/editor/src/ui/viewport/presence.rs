@@ -1,7 +1,7 @@
 use dear_imgui_rs::{MouseButton, PopupQueryFlags, Ui};
 use editor::document::DocumentId;
 
-use super::{ViewFrame, selection::shows_block_selection};
+use super::{ViewFrame, selection::shows_region_selection};
 use crate::{
     camera::clamp_zoom,
     pacing::FrameDemand,
@@ -113,7 +113,7 @@ pub(super) fn share_presence(session: &Session, frame: &ViewFrame<'_>, coop: &mu
     });
     coop.selection = session
         .selection()
-        .filter(|_| shows_block_selection(session.tool()))
+        .filter(|_| shows_region_selection(session.tool()))
         .map(|source| {
             let selection = frame.gestures.displayed(source);
             net::Selection {

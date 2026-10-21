@@ -50,8 +50,8 @@ impl UiState {
                 self.gizmo.cancel();
                 session.delete_picked_instance();
             },
-            Some(EditCommand::Paste) if let Some(block) = session.clipboard() => {
-                let (width, height) = (block.width(), block.height());
+            Some(EditCommand::Paste) if let Some(region) = session.clipboard() => {
+                let (width, height) = (region.width(), region.height());
                 restore_rectangle_gesture(session, frame.id, &mut frame.gestures.rectangle_gesture);
                 let anchor = frame.coord.or_else(|| {
                     let size = session.map()?.size();
@@ -61,10 +61,10 @@ impl UiState {
                         .screen_to_tile(frame.layout.center(), size, session.options.tile_size, session.z())
                 });
                 if let (Some(anchor), Some(size)) = (anchor, session.map().map(|map| map.size())) {
-                    session.set_tool(Tool::BlockSelect);
+                    session.set_tool(Tool::Select);
                     self.gizmo.cancel();
-                    frame.gestures.block_placement = None;
-                    frame.gestures.block_selection_anchor = None;
+                    frame.gestures.region_placement = None;
+                    frame.gestures.region_selection_anchor = None;
                     session.paste_clipboard(
                         centered_paste_min(width, height, anchor, size),
                         SelectionRotation::Original,
@@ -75,7 +75,7 @@ impl UiState {
                 frame.gestures.cancel(session, frame.id);
                 frame.gestures.module_popup = None;
                 self.gizmo.cancel();
-                session.select_block(None);
+                session.select_region(None);
                 session.pick_instance(None);
             },
             _ => {},
@@ -97,12 +97,12 @@ impl UiState {
         let gestures = &mut *frame.gestures;
         if gestures.rectangle_gesture.is_some() {
             restore_rectangle_gesture(session, frame.id, &mut gestures.rectangle_gesture);
-            gestures.block_selection_anchor = None;
-        } else if gestures.block_placement.is_some() || gestures.fill_anchor.is_some() {
-            gestures.block_placement = None;
+            gestures.region_selection_anchor = None;
+        } else if gestures.region_placement.is_some() || gestures.fill_anchor.is_some() {
+            gestures.region_placement = None;
             gestures.fill_anchor = None;
-        } else if matches!(tool, Tool::BlockSelect | Tool::Fill) {
-            session.select_block(None);
+        } else if matches!(tool, Tool::Select | Tool::Fill) {
+            session.select_region(None);
         }
 
         self.gizmo.cancel();
@@ -196,7 +196,7 @@ impl UiState {
                 },
             },
             MenuAction::Mirror(transform) => {
-                session.transform_selected_block_with_mode(transform, session.selection_mode());
+                session.transform_selected_region_with_mode(transform, session.selection_mode());
             },
         }
     }

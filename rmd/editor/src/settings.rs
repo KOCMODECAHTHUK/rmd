@@ -324,7 +324,7 @@ pub(crate) enum KeybindAction {
     PlaceTool,
     PickTool,
     NodeTool,
-    BlockSelectTool,
+    SelectTool,
     DeleteTool,
     ReplaceTool,
     FillTool,
@@ -385,7 +385,7 @@ impl KeybindAction {
         Self::PlaceTool,
         Self::PickTool,
         Self::NodeTool,
-        Self::BlockSelectTool,
+        Self::SelectTool,
         Self::DeleteTool,
         Self::ReplaceTool,
         Self::FillTool,
@@ -458,7 +458,7 @@ impl KeybindAction {
             Self::PlaceTool => "Place tool",
             Self::PickTool => "Pick tool",
             Self::NodeTool => "Node tool",
-            Self::BlockSelectTool => "Block select tool",
+            Self::SelectTool => "Select tool",
             Self::DeleteTool => "Delete tool",
             Self::ReplaceTool => "Replace tool",
             Self::FillTool => "Fill tool",
@@ -466,10 +466,10 @@ impl KeybindAction {
             Self::CommentTool => "Comment tool",
             Self::Rotate => "Rotate",
             Self::ToolAlternate => "Alternate tool action (hold)",
-            Self::Copy => "Copy block",
-            Self::Cut => "Cut block",
-            Self::Delete => "Delete block",
-            Self::Paste => "Paste block",
+            Self::Copy => "Copy region",
+            Self::Cut => "Cut region",
+            Self::Delete => "Delete region",
+            Self::Paste => "Paste region",
             Self::Deselect => "Deselect",
             Self::Find => "Search",
             Self::FindNext => "Next search match",
@@ -524,7 +524,7 @@ impl KeybindAction {
             Self::PlaceTool => "place-tool",
             Self::PickTool => "pick-tool",
             Self::NodeTool => "node-tool",
-            Self::BlockSelectTool => "block-select-tool",
+            Self::SelectTool => "select-tool",
             Self::DeleteTool => "delete-tool",
             Self::ReplaceTool => "replace-tool",
             Self::FillTool => "fill-tool",
@@ -589,7 +589,8 @@ pub(crate) struct KeyBindings {
     #[serde(rename = "select_tool")]
     pick_tool: KeyBinding,
     node_tool: KeyBinding,
-    block_select_tool: KeyBinding,
+    #[serde(rename = "block_select_tool")]
+    select_tool: KeyBinding,
     delete_tool: KeyBinding,
     replace_tool: KeyBinding,
     fill_tool: KeyBinding,
@@ -651,7 +652,7 @@ impl Default for KeyBindings {
             place_tool: KeyBinding::new(Key::W),
             pick_tool: KeyBinding::new(Key::S),
             node_tool: KeyBinding::new(Key::N),
-            block_select_tool: KeyBinding::with_shift(Key::S),
+            select_tool: KeyBinding::with_shift(Key::S),
             delete_tool: KeyBinding::new(Key::X),
             replace_tool: KeyBinding::new(Key::E),
             fill_tool: KeyBinding::new(Key::Q),
@@ -715,7 +716,7 @@ impl KeyBindings {
             place_tool: KeyBinding::new(Key::Key1),
             pick_tool: KeyBinding::new(Key::S),
             node_tool: KeyBinding::new(Key::N),
-            block_select_tool: KeyBinding::new(Key::Key3),
+            select_tool: KeyBinding::new(Key::Key3),
             delete_tool: KeyBinding::new(Key::D),
             replace_tool: KeyBinding::new(Key::Key4),
             fill_tool: KeyBinding::with_shift(Key::Key2),
@@ -777,7 +778,7 @@ impl KeyBindings {
             KeybindAction::PlaceTool => self.place_tool,
             KeybindAction::PickTool => self.pick_tool,
             KeybindAction::NodeTool => self.node_tool,
-            KeybindAction::BlockSelectTool => self.block_select_tool,
+            KeybindAction::SelectTool => self.select_tool,
             KeybindAction::DeleteTool => self.delete_tool,
             KeybindAction::ReplaceTool => self.replace_tool,
             KeybindAction::FillTool => self.fill_tool,
@@ -894,7 +895,7 @@ impl KeyBindings {
             KeybindAction::PlaceTool => self.place_tool = binding,
             KeybindAction::PickTool => self.pick_tool = binding,
             KeybindAction::NodeTool => self.node_tool = binding,
-            KeybindAction::BlockSelectTool => self.block_select_tool = binding,
+            KeybindAction::SelectTool => self.select_tool = binding,
             KeybindAction::DeleteTool => self.delete_tool = binding,
             KeybindAction::ReplaceTool => self.replace_tool = binding,
             KeybindAction::FillTool => self.fill_tool = binding,
@@ -1552,10 +1553,7 @@ mod tests {
         for (action, key) in expected {
             assert_eq!(bindings.get(action), KeyBinding::new(key));
         }
-        assert_eq!(
-            bindings.get(KeybindAction::BlockSelectTool),
-            KeyBinding::with_shift(Key::S)
-        );
+        assert_eq!(bindings.get(KeybindAction::SelectTool), KeyBinding::with_shift(Key::S));
         assert_eq!(
             bindings.get(KeybindAction::RectFillTool),
             KeyBinding::with_shift(Key::Q)
@@ -1603,7 +1601,7 @@ mod tests {
             (KeybindAction::PlaceTool, KeyBinding::new(Key::Key1)),
             (KeybindAction::PickTool, KeyBinding::new(Key::S)),
             (KeybindAction::NodeTool, KeyBinding::new(Key::N)),
-            (KeybindAction::BlockSelectTool, KeyBinding::new(Key::Key3)),
+            (KeybindAction::SelectTool, KeyBinding::new(Key::Key3)),
             (KeybindAction::DeleteTool, KeyBinding::new(Key::D)),
             (KeybindAction::ReplaceTool, KeyBinding::new(Key::Key4)),
             (KeybindAction::FillTool, KeyBinding::with_shift(Key::Key2)),
@@ -1726,10 +1724,15 @@ mod tests {
             String::from("select_tool"),
             toml::Value::try_from(KeyBinding::with_ctrl(Key::P)).unwrap(),
         );
+        table.insert(
+            String::from("block_select_tool"),
+            toml::Value::try_from(KeyBinding::with_ctrl(Key::B)).unwrap(),
+        );
 
         let bindings: KeyBindings = stored.try_into().unwrap();
 
         assert_eq!(bindings.get(KeybindAction::PickTool), KeyBinding::with_ctrl(Key::P));
+        assert_eq!(bindings.get(KeybindAction::SelectTool), KeyBinding::with_ctrl(Key::B));
     }
 
     #[test]

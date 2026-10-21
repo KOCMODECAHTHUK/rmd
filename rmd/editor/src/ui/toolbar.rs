@@ -7,7 +7,7 @@ use editor::{
 };
 
 use super::{
-    BlockSelectionOptions, DeleteLevelDialog, MAX_CUSTOM_FILL_SEARCH_RESULTS, NewLevelDialog, OverlayRect,
+    DeleteLevelDialog, MAX_CUSTOM_FILL_SEARCH_RESULTS, NewLevelDialog, OverlayRect, RegionSelectionOptions,
     draw_overlay_underlay, draw_selection_mode_controls, draw_type_path_search, overlay_padding,
 };
 use crate::{
@@ -78,7 +78,7 @@ fn draw_z_levels(
 pub(super) struct TopOverlayState<'a> {
     pub(super) keybindings: KeyBindings,
     pub(super) selection_busy: bool,
-    pub(super) block_selection_options: &'a mut BlockSelectionOptions,
+    pub(super) region_selection_options: &'a mut RegionSelectionOptions,
     pub(super) fill_mode: &'a mut FillMode,
     pub(super) custom_fill_boundaries: &'a mut Vec<TreePath>,
     pub(super) custom_fill_search: &'a mut String,
@@ -90,7 +90,7 @@ pub(super) fn draw_top_overlay(ui: &Ui, session: &mut Session, bounds: OverlayRe
     let TopOverlayState {
         keybindings,
         selection_busy,
-        block_selection_options,
+        region_selection_options,
         fill_mode,
         custom_fill_boundaries,
         custom_fill_search,
@@ -115,7 +115,7 @@ pub(super) fn draw_top_overlay(ui: &Ui, session: &mut Session, bounds: OverlayRe
         draw_tool_button(ui, session, keybindings, Tool::Comment);
     }
     ui.same_line();
-    draw_block_select_tool_button(ui, session, block_selection_options, keybindings, selection_busy);
+    draw_select_tool_button(ui, session, region_selection_options, keybindings, selection_busy);
     ui.same_line();
     draw_tool_button(ui, session, keybindings, Tool::Delete);
     ui.same_line();
@@ -138,18 +138,19 @@ pub(super) fn draw_top_overlay(ui: &Ui, session: &mut Session, bounds: OverlayRe
     draw_z_levels(ui, session, new_level_dialog, delete_level_dialog);
 }
 
-fn draw_block_select_tool_button(
-    ui: &Ui, session: &mut Session, options: &mut BlockSelectionOptions, keybindings: KeyBindings, selection_busy: bool,
+fn draw_select_tool_button(
+    ui: &Ui, session: &mut Session, options: &mut RegionSelectionOptions, keybindings: KeyBindings,
+    selection_busy: bool,
 ) {
-    const POPUP: &str = "block-selection-options-popup";
+    const POPUP: &str = "region-selection-options-popup";
 
     let active_color = ui.style_color(StyleColor::PlotHistogramHovered);
-    let active = (session.tool() == Tool::BlockSelect).then(|| ui.push_style_color(StyleColor::Button, active_color));
+    let active = (session.tool() == Tool::Select).then(|| ui.push_style_color(StyleColor::Button, active_color));
     let spacing = ui.clone_style().item_spacing();
     let connected = ui.push_style_var(StyleVar::ItemSpacing([0.0, spacing[1]]));
 
-    if ui.button(format!("{}##block-select-tool", Tool::BlockSelect.icon())) {
-        session.set_tool(Tool::BlockSelect);
+    if ui.button(format!("{}##select-tool", Tool::Select.icon())) {
+        session.set_tool(Tool::Select);
     }
     let separator_x = ui.item_rect_max()[0];
     let separator_min_y = ui.item_rect_min()[1];
@@ -157,7 +158,7 @@ fn draw_block_select_tool_button(
     ui.set_item_tooltip(format!(
         "Rectangle selection ({})\nDrag: {} {ICON_CIRCLE_SMALL} Hold Shift while drawing: Border\nDrag the selection \
          to move it, Ctrl+drag to copy, edge handles to resize\nClick outside to clear {ICON_CIRCLE_SMALL} {}: rotate",
-        keybindings.get(KeybindAction::BlockSelectTool).label(ui),
+        keybindings.get(KeybindAction::SelectTool).label(ui),
         options.label(),
         keybindings.get(KeybindAction::Rotate).label(ui)
     ));
@@ -172,14 +173,14 @@ fn draw_block_select_tool_button(
         let _padding = ui.push_style_var(StyleVar::FramePadding([0.0, frame_padding[1]]));
         let _alignment = ui.push_style_var(StyleVar::ButtonTextAlign([0.5, 0.5]));
         ui.button_with_size(
-            format!("{ICON_MENU_DOWN}##block-fill-options"),
+            format!("{ICON_MENU_DOWN}##region-fill-options"),
             [arrow_width, button_size],
         )
     };
     if arrow_clicked {
         ui.open_popup(POPUP);
     }
-    ui.set_item_tooltip(format!("Block selection: {}", options.label()));
+    ui.set_item_tooltip(format!("Region selection: {}", options.label()));
     ui.get_window_draw_list().add_line_v(
         separator_x,
         separator_min_y + frame_padding[1],
@@ -344,7 +345,7 @@ fn draw_tool_button(ui: &Ui, session: &mut Session, keybindings: KeyBindings, to
                 "Double-click: select network, drag handle: connect\nRight-click: delete, Shift+right-click: map menu",
             ),
         ),
-        Tool::BlockSelect => (KeybindAction::BlockSelectTool, String::from("Drag to select an area")),
+        Tool::Select => (KeybindAction::SelectTool, String::from("Drag to select an area")),
         Tool::Delete => (
             KeybindAction::DeleteTool,
             format!("Click an atom to delete it\n{alternate}+drag: clear visible atoms"),
