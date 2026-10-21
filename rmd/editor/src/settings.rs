@@ -322,7 +322,7 @@ pub(crate) enum KeybindAction {
     LevelDown,
     Refit,
     PlaceTool,
-    SelectTool,
+    PickTool,
     NodeTool,
     BlockSelectTool,
     DeleteTool,
@@ -383,7 +383,7 @@ impl KeybindAction {
         Self::LevelDown,
         Self::Refit,
         Self::PlaceTool,
-        Self::SelectTool,
+        Self::PickTool,
         Self::NodeTool,
         Self::BlockSelectTool,
         Self::DeleteTool,
@@ -456,7 +456,7 @@ impl KeybindAction {
             Self::LevelDown => "Z down",
             Self::Refit => "Refit",
             Self::PlaceTool => "Place tool",
-            Self::SelectTool => "Select tool",
+            Self::PickTool => "Pick tool",
             Self::NodeTool => "Node tool",
             Self::BlockSelectTool => "Block select tool",
             Self::DeleteTool => "Delete tool",
@@ -522,7 +522,7 @@ impl KeybindAction {
             Self::LevelDown => "level-down",
             Self::Refit => "refit",
             Self::PlaceTool => "place-tool",
-            Self::SelectTool => "select-tool",
+            Self::PickTool => "pick-tool",
             Self::NodeTool => "node-tool",
             Self::BlockSelectTool => "block-select-tool",
             Self::DeleteTool => "delete-tool",
@@ -586,7 +586,8 @@ pub(crate) struct KeyBindings {
     level_down: KeyBinding,
     refit: KeyBinding,
     place_tool: KeyBinding,
-    select_tool: KeyBinding,
+    #[serde(rename = "select_tool")]
+    pick_tool: KeyBinding,
     node_tool: KeyBinding,
     block_select_tool: KeyBinding,
     delete_tool: KeyBinding,
@@ -648,7 +649,7 @@ impl Default for KeyBindings {
             level_down: KeyBinding::new(Key::PageDown),
             refit: KeyBinding::new(Key::Home),
             place_tool: KeyBinding::new(Key::W),
-            select_tool: KeyBinding::new(Key::S),
+            pick_tool: KeyBinding::new(Key::S),
             node_tool: KeyBinding::new(Key::N),
             block_select_tool: KeyBinding::with_shift(Key::S),
             delete_tool: KeyBinding::new(Key::X),
@@ -712,7 +713,7 @@ impl KeyBindings {
             level_down: KeyBinding::with_ctrl(Key::DownArrow),
             refit: KeyBinding::new(Key::Home),
             place_tool: KeyBinding::new(Key::Key1),
-            select_tool: KeyBinding::new(Key::S),
+            pick_tool: KeyBinding::new(Key::S),
             node_tool: KeyBinding::new(Key::N),
             block_select_tool: KeyBinding::new(Key::Key3),
             delete_tool: KeyBinding::new(Key::D),
@@ -774,7 +775,7 @@ impl KeyBindings {
             KeybindAction::LevelDown => self.level_down,
             KeybindAction::Refit => self.refit,
             KeybindAction::PlaceTool => self.place_tool,
-            KeybindAction::SelectTool => self.select_tool,
+            KeybindAction::PickTool => self.pick_tool,
             KeybindAction::NodeTool => self.node_tool,
             KeybindAction::BlockSelectTool => self.block_select_tool,
             KeybindAction::DeleteTool => self.delete_tool,
@@ -891,7 +892,7 @@ impl KeyBindings {
             KeybindAction::LevelDown => self.level_down = binding,
             KeybindAction::Refit => self.refit = binding,
             KeybindAction::PlaceTool => self.place_tool = binding,
-            KeybindAction::SelectTool => self.select_tool = binding,
+            KeybindAction::PickTool => self.pick_tool = binding,
             KeybindAction::NodeTool => self.node_tool = binding,
             KeybindAction::BlockSelectTool => self.block_select_tool = binding,
             KeybindAction::DeleteTool => self.delete_tool = binding,
@@ -1540,7 +1541,7 @@ mod tests {
             (KeybindAction::LevelDown, Key::PageDown),
             (KeybindAction::Refit, Key::Home),
             (KeybindAction::PlaceTool, Key::W),
-            (KeybindAction::SelectTool, Key::S),
+            (KeybindAction::PickTool, Key::S),
             (KeybindAction::DeleteTool, Key::X),
             (KeybindAction::ReplaceTool, Key::E),
             (KeybindAction::FillTool, Key::Q),
@@ -1600,7 +1601,7 @@ mod tests {
             (KeybindAction::LevelDown, KeyBinding::with_ctrl(Key::DownArrow)),
             (KeybindAction::Refit, KeyBinding::new(Key::Home)),
             (KeybindAction::PlaceTool, KeyBinding::new(Key::Key1)),
-            (KeybindAction::SelectTool, KeyBinding::new(Key::S)),
+            (KeybindAction::PickTool, KeyBinding::new(Key::S)),
             (KeybindAction::NodeTool, KeyBinding::new(Key::N)),
             (KeybindAction::BlockSelectTool, KeyBinding::new(Key::Key3)),
             (KeybindAction::DeleteTool, KeyBinding::new(Key::D)),
@@ -1714,6 +1715,21 @@ mod tests {
         assert_eq!(bindings.get(KeybindAction::Redo), KeyBinding::with_ctrl(Key::Y));
         assert_eq!(bindings.recent(0), Some(KeyBinding::new(Key::Key1)));
         assert_eq!(bindings.recent(9), Some(KeyBinding::new(Key::Key0)));
+    }
+
+    #[test]
+    fn renamed_tool_bindings_keep_their_stored_keys() {
+        let mut stored = toml::Value::try_from(KeyBindings::default()).unwrap();
+        let table = stored.as_table_mut().unwrap();
+        assert!(!table.contains_key("pick_tool"));
+        table.insert(
+            String::from("select_tool"),
+            toml::Value::try_from(KeyBinding::with_ctrl(Key::P)).unwrap(),
+        );
+
+        let bindings: KeyBindings = stored.try_into().unwrap();
+
+        assert_eq!(bindings.get(KeybindAction::PickTool), KeyBinding::with_ctrl(Key::P));
     }
 
     #[test]

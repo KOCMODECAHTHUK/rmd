@@ -111,7 +111,7 @@ fn remote_cursors_glide_but_jump_across_maps_and_levels() {
         map: String::from(map),
         z,
         pos: [x, 0.0],
-        tool: net::Tool::Select,
+        tool: net::Tool::Pick,
     };
     let mut peer = RemotePeer::new(PeerInfo {
         id: PeerId(1),
@@ -147,7 +147,7 @@ fn remote_cursors_glide_but_jump_across_maps_and_levels() {
 fn the_comment_tool_only_works_while_connected() {
     let mut host = session();
     host.set_tool(Tool::Comment);
-    assert_eq!(host.tool(), Tool::Select);
+    assert_eq!(host.tool(), Tool::Pick);
 
     host.host_coop(0, net::hash_password("hunter2"), String::from("host"))
         .unwrap();
@@ -157,7 +157,7 @@ fn the_comment_tool_only_works_while_connected() {
 
     host.leave_coop();
     host.poll_coop();
-    assert_eq!(host.tool(), Tool::Select);
+    assert_eq!(host.tool(), Tool::Pick);
 }
 
 #[test]

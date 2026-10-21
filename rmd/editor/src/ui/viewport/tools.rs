@@ -43,29 +43,29 @@ impl Clicks {
 pub(super) fn configure_tool_interaction(tool: Tool, interaction: &mut MapViewInteraction) {
     interaction.mode = match (tool, interaction.mode) {
         (Tool::Place | Tool::BlockSelect | Tool::Fill | Tool::RectFill, _) => InteractionMode::Place,
-        (Tool::Select | Tool::Replace, InteractionMode::Select { pick }) => InteractionMode::Select { pick },
+        (Tool::Pick | Tool::Replace, InteractionMode::Pick { pick }) => InteractionMode::Pick { pick },
         (Tool::Node, InteractionMode::Node { pick }) => InteractionMode::Node { pick },
         (Tool::Delete, InteractionMode::Delete { pick }) => InteractionMode::Delete { pick },
-        (Tool::Select | Tool::Replace | Tool::Comment, _) => InteractionMode::Select { pick: None },
+        (Tool::Pick | Tool::Replace | Tool::Comment, _) => InteractionMode::Pick { pick: None },
         (Tool::Node, _) => InteractionMode::Node { pick: None },
         (Tool::Delete, _) => InteractionMode::Delete { pick: None },
     };
     match tool {
         Tool::Place | Tool::BlockSelect | Tool::Fill | Tool::RectFill | Tool::Comment => {
             interaction.cursor = None;
-            interaction.selected = None;
+            interaction.picked = None;
         },
         Tool::Delete | Tool::Replace => {
-            interaction.selected = None;
+            interaction.picked = None;
         },
-        Tool::Select | Tool::Node => {},
+        Tool::Pick | Tool::Node => {},
     }
 }
 
 pub(super) fn interaction_mode(tool: Tool) -> InteractionMode {
     match tool {
         Tool::Place | Tool::BlockSelect | Tool::Fill | Tool::RectFill => InteractionMode::Place,
-        Tool::Select | Tool::Replace | Tool::Comment => InteractionMode::Select { pick: None },
+        Tool::Pick | Tool::Replace | Tool::Comment => InteractionMode::Pick { pick: None },
         Tool::Node => InteractionMode::Node { pick: None },
         Tool::Delete => InteractionMode::Delete { pick: None },
     }
@@ -74,7 +74,7 @@ pub(super) fn interaction_mode(tool: Tool) -> InteractionMode {
 pub(super) fn request_pick(interaction: &mut MapViewInteraction, request: PickRequest) {
     match &mut interaction.mode {
         InteractionMode::Place => {},
-        InteractionMode::Select { pick } | InteractionMode::Node { pick } | InteractionMode::Delete { pick } => {
+        InteractionMode::Pick { pick } | InteractionMode::Node { pick } | InteractionMode::Delete { pick } => {
             *pick = Some(request);
         },
     }
@@ -206,7 +206,7 @@ impl UiState {
         gizmo_view: GizmoMapView,
     ) -> bool {
         match tool {
-            Tool::Select => {
+            Tool::Pick => {
                 self.gizmo
                     .draw(
                         ui,
@@ -270,11 +270,11 @@ impl UiState {
 
         match tool {
             Tool::Place => self.place_at(ui, session, settings, frame, coord, clicks, is_alternate),
-            Tool::Select => {
+            Tool::Pick => {
                 if clicks.is_left_double_clicked {
                     request_pick(frame.interaction, PickRequest::NodeSeed(coord));
                 } else if clicks.is_left_clicked {
-                    request_pick(frame.interaction, PickRequest::Select);
+                    request_pick(frame.interaction, PickRequest::Pick);
                 }
             },
             Tool::Node => {},

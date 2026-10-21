@@ -179,7 +179,7 @@ fn placement_strokes_only_match_their_starting_context() {
     let stroke = PlacementStroke::new(prefab.clone(), 2);
 
     assert!(stroke.matches_context(Tool::Place, Some(&prefab), 2));
-    assert!(!stroke.matches_context(Tool::Select, Some(&prefab), 2));
+    assert!(!stroke.matches_context(Tool::Pick, Some(&prefab), 2));
     assert!(!stroke.matches_context(Tool::Place, Some(&other), 2));
     assert!(!stroke.matches_context(Tool::Place, Some(&prefab), 1));
     assert!(!stroke.matches_context(Tool::Place, None, 2));
@@ -190,32 +190,32 @@ fn tool_interaction_configures_highlights_and_pick_requests() {
     let owner = PrefabInstanceId::from_raw(7).unwrap();
     let interaction = MapViewInteraction {
         cursor: Some([10, 20]),
-        selected: Some(owner),
+        picked: Some(owner),
         placement_flash: Some(PlacementFlash { owner, strength: 0.5 }),
         highlight: HighlightStyle::Tint,
-        mode: InteractionMode::Select {
-            pick: Some(PickRequest::Select),
+        mode: InteractionMode::Pick {
+            pick: Some(PickRequest::Pick),
         },
     };
-    let mut selected = interaction;
+    let mut picked = interaction;
 
-    configure_tool_interaction(Tool::Select, &mut selected);
-    assert_eq!(selected, interaction);
+    configure_tool_interaction(Tool::Pick, &mut picked);
+    assert_eq!(picked, interaction);
 
     let mut delete = interaction;
     configure_tool_interaction(Tool::Delete, &mut delete);
     assert_eq!(
         delete,
         MapViewInteraction {
-            selected: None,
+            picked: None,
             mode: InteractionMode::Delete { pick: None },
             ..interaction
         }
     );
 
-    configure_tool_interaction(Tool::Place, &mut selected);
+    configure_tool_interaction(Tool::Place, &mut picked);
     assert_eq!(
-        selected,
+        picked,
         MapViewInteraction {
             placement_flash: interaction.placement_flash,
             highlight: interaction.highlight,

@@ -294,13 +294,13 @@ impl UiState {
             let refit = refit_active && session.state.active() == Some(id);
             let mut keep_open = true;
             let active = session.state.active() == Some(id);
-            let guides = if active && settings.selection_guide_line && session.tool() == Tool::Select {
-                session.selected_guides()
+            let guides = if active && settings.selection_guide_line && session.tool() == Tool::Pick {
+                session.picked_guides()
             } else {
                 Default::default()
             };
             let mut interaction = MapViewInteraction {
-                selected: session.selected_instance_of(id).filter(|_| active),
+                picked: session.picked_instance_of(id).filter(|_| active),
                 highlight: settings.selection_highlight.style(),
                 mode: interaction_mode(session.tool()),
                 ..Default::default()
@@ -560,7 +560,7 @@ impl UiState {
 
         sync_gestures(session, frame.gestures, tool);
         let conflict_regions = session.conflict_regions(frame.id, Some(session.z()));
-        let is_gizmo_hot = tool == Tool::Select
+        let is_gizmo_hot = tool == Tool::Pick
             && self.gizmo.is_handle_hovered(
                 ui,
                 session,

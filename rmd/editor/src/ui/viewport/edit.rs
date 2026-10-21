@@ -46,9 +46,9 @@ impl UiState {
                     session.delete_selection();
                 }
             },
-            Some(EditCommand::Delete) if session.selected_instance().is_some() => {
+            Some(EditCommand::Delete) if session.picked_instance().is_some() => {
                 self.gizmo.cancel();
-                session.delete_selected_instance();
+                session.delete_picked_instance();
             },
             Some(EditCommand::Paste) if let Some(block) = session.clipboard() => {
                 let (width, height) = (block.width(), block.height());
@@ -76,7 +76,7 @@ impl UiState {
                 frame.gestures.module_popup = None;
                 self.gizmo.cancel();
                 session.select_block(None);
-                session.select_instance(None);
+                session.pick_instance(None);
             },
             _ => {},
         }
@@ -165,8 +165,8 @@ impl UiState {
                 session.delete_tile(coord, None);
             },
             MenuAction::Select(instance) => {
-                session.select_instance(Some(instance));
-                self.reveal_selected_instance(session);
+                session.pick_instance(Some(instance));
+                self.reveal_picked_instance(session);
             },
             MenuAction::DeleteAtom(instance) => {
                 session.delete_context_instance(instance);

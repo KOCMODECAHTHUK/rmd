@@ -274,6 +274,6 @@ mod tests {
         ));
         assert!(node_right_click(Tool::Node, true, &connected).is_none());
         assert!(node_right_click(Tool::Node, false, &NodeOverlayHit::default()).is_none());
-        assert!(node_right_click(Tool::Select, false, &connected).is_none());
+        assert!(node_right_click(Tool::Pick, false, &connected).is_none());
     }
 }

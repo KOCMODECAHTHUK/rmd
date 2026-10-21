@@ -95,7 +95,7 @@ impl TransformMode {
 
 #[derive(Default)]
 pub struct InspectorState {
-    selected: Option<PrefabInstanceId>,
+    picked: Option<PrefabInstanceId>,
     drafts: HashMap<Identifier, VariableDraft>,
     active_drag: Option<(Identifier, EditGroupId)>,
     transform_mode: TransformMode,
@@ -164,7 +164,7 @@ struct InspectorProperty {
 }
 
 struct InspectorSnapshot {
-    selected: PrefabInstanceId,
+    picked: PrefabInstanceId,
     groups: Vec<VariableGroup>,
     location: PrefabLocation,
     is_atom: bool,
@@ -211,7 +211,7 @@ impl InspectorState {
             snapshot.location.coord.x, snapshot.location.coord.y, snapshot.location.coord.z
         ));
         let find_similar = ui.text_link("Find similar...");
-        let is_preview = snapshot.selected.get() >= PREVIEW_ID_START;
+        let is_preview = snapshot.picked.get() >= PREVIEW_ID_START;
         if is_preview {
             ui.text_disabled("Module preview, read only");
         }
@@ -729,16 +729,16 @@ impl InspectorState {
     }
 
     fn clear(&mut self) {
-        self.selected = None;
+        self.picked = None;
         self.drafts.clear();
         self.active_drag = None;
     }
 
     fn sync(&mut self, snapshot: &InspectorSnapshot) {
-        if self.selected != Some(snapshot.selected) {
+        if self.picked != Some(snapshot.picked) {
             self.drafts.clear();
             self.active_drag = None;
-            self.selected = Some(snapshot.selected);
+            self.picked = Some(snapshot.picked);
         }
 
         if !snapshot.is_movable {
@@ -879,9 +879,9 @@ fn split_pinned<'a>(variables: &'a [InspectorVariable], pins: &[String]) -> Spli
 }
 
 fn inspector_snapshot(session: &Session) -> Option<InspectorSnapshot> {
-    let selected = session.selected_instance()?;
-    let location = session.selected_location()?;
-    let prefab = session.selected_prefab()?;
+    let picked = session.picked_instance()?;
+    let location = session.picked_location()?;
+    let prefab = session.picked_prefab()?;
     let tree = session.tree();
     let type_id = tree.and_then(|tree| tree.id_of(&prefab.path));
     let is_atom = matches!((tree, type_id), (Some(tree), Some(id)) if tree.roots().atom.is_some_and(|atom| tree.is_subtype_of(id, atom)));
@@ -916,7 +916,7 @@ fn inspector_snapshot(session: &Session) -> Option<InspectorSnapshot> {
         .unwrap_or_default()
         .to_string();
     let metadata = session.icon_metadata(&icon);
-    let directional_types = session.selected_directional_types();
+    let directional_types = session.picked_directional_types();
     let declared_directions = session.declared_directions(&prefab.path);
     let icon_states = metadata
         .map(|metadata| {
@@ -929,7 +929,7 @@ fn inspector_snapshot(session: &Session) -> Option<InspectorSnapshot> {
         .unwrap_or_default();
 
     Some(InspectorSnapshot {
-        selected,
+        picked,
         groups: variable_groups(tree, type_id, &prefab.path, &variables, |id| session.type_source(id)),
         location,
         is_atom,
@@ -1404,8 +1404,8 @@ fn commit_int_property(
     // Each identical instance keeps its own tile, so their offsets are set as typed
     if scope == EditScope::Selected
         && let Some(axis) = transform_axis(mode, name)
-        && let Some(transform) = session.selected_transform()
-        && let Some(location) = session.selected_location()
+        && let Some(transform) = session.picked_transform()
+        && let Some(location) = session.picked_location()
     {
         let current = match mode {
             TransformMode::Pixel => transform.pixel[axis],
@@ -1440,7 +1440,7 @@ fn commit_int_property(
     let mutation = VarMutation::Set(name.clone(), Value::Num(committed as f32));
     match to_coord {
         Some(coord) => {
-            session.move_selected_instance(coord, label, &[mutation], Some(group));
+            session.move_picked_instance(coord, label, &[mutation], Some(group));
         },
         None => {
             session.edit_instance_vars_in(scope, label, &[mutation], Some(group));
@@ -1919,7 +1919,7 @@ impl InspectorPanel {
             .find_similar
             .then(|| session.state.active_document())
             .flatten()
-            .and_then(|document| Some((document.id(), document.selected_instance()?)));
+            .and_then(|document| Some((document.id(), document.picked_instance()?)));
 
         InspectorPanelOutput {
             open_source: output.open_source,
@@ -1963,7 +1963,7 @@ mod tests {
         });
         let document = session.state.active_document().unwrap();
         let tables = [1, 2].map(|x| document.instance_ids_at(Coord::new(x, 1, 1))[1]);
-        session.select_instance(Some(tables[0]));
+        session.pick_instance(Some(tables[0]));
 
         (session, tables)
     }

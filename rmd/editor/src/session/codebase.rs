@@ -267,7 +267,7 @@ impl Session {
         self.check_coop_codebase(&loaded.environment);
         self.cancel_node_edit();
         if self.state.tool == Tool::Node {
-            self.state.tool = Tool::Select;
+            self.state.tool = Tool::Pick;
         }
 
         let LoadedCodebase {
@@ -587,13 +587,13 @@ b
             .id_of(&TreePath::parse("/obj/structure/table"))
             .unwrap();
         let coord = Coord::new(6, 3, 1);
-        let selected = session.state.active_document().unwrap().instance_ids_at(coord)[0];
+        let picked = session.state.active_document().unwrap().instance_ids_at(coord)[0];
 
         assert!(session.toggle_type_visibility(table));
-        assert!(session.instances().unwrap().sprite(selected).is_none());
-        session.select_instance(Some(selected));
+        assert!(session.instances().unwrap().sprite(picked).is_none());
+        session.pick_instance(Some(picked));
         assert_eq!(
-            session.set_selected_instance_var("name".into(), Value::Text(String::from("Unsaved table"))),
+            session.set_picked_instance_var("name".into(), Value::Text(String::from("Unsaved table"))),
             Some(true)
         );
         assert!(session.state.active_document().unwrap().is_dirty());
@@ -605,9 +605,9 @@ b
             .unwrap();
 
         assert!(session.is_type_visible(reloaded_table));
-        assert!(session.instances().unwrap().sprite(selected).is_some());
+        assert!(session.instances().unwrap().sprite(picked).is_some());
         assert!(session.state.active_document().unwrap().is_dirty());
-        assert_eq!(session.selected_instance(), Some(selected));
+        assert_eq!(session.picked_instance(), Some(picked));
         assert_render_cache_matches_rebuild(&session);
     }
 }

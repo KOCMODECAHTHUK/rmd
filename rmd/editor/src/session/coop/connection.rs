@@ -177,7 +177,7 @@ impl Session {
 
     pub fn poll_coop(&mut self) {
         if self.state.tool == Tool::Comment && !self.comment_tool_available() {
-            self.state.tool = Tool::Select;
+            self.state.tool = Tool::Pick;
         }
 
         let codebase = self.codebase_dir().map(Path::to_path_buf);

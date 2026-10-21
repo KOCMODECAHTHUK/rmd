@@ -149,7 +149,7 @@ struct CullChunk {
 struct InteractionPush {
     cursor: [u32; 2],
     cursor_valid: u32,
-    selected_owner: [u32; 2],
+    picked_owner: [u32; 2],
     stripe_offset: f32,
     focused_area_owner: [u32; 2],
     connected_count: u32,
@@ -166,7 +166,7 @@ struct GpuGuideLine {
 #[derive(Debug, Clone, Copy)]
 struct GuidePush {
     viewport: [f32; 2],
-    selected_owner: [u32; 2],
+    picked_owner: [u32; 2],
     stripe_offset: f32,
 }
 
@@ -2207,7 +2207,7 @@ impl Renderer {
             let push = InteractionPush {
                 cursor: local_cursor.unwrap_or([0; 2]),
                 cursor_valid: u32::from(local_cursor.is_some()),
-                selected_owner: interaction.selected.map(owner_words).unwrap_or([0; 2]),
+                picked_owner: interaction.picked.map(owner_words).unwrap_or([0; 2]),
                 stripe_offset,
                 focused_area_owner: view.focused_area.map(owner_words).unwrap_or([0; 2]),
                 connected_count: guides.connected_count,
@@ -2225,7 +2225,7 @@ impl Renderer {
             let picks = pick.is_some() && picking_map == Some(index) && local_cursor.is_some();
             recorded.program.set(should_pick, picks);
 
-            let has_highlight = interaction.selected.is_some() || local_cursor.is_some() || guides.connected_count > 0;
+            let has_highlight = interaction.picked.is_some() || local_cursor.is_some() || guides.connected_count > 0;
             let has_guide_lines = guides.line_count > 0;
             recorded.program.set(slots.has_highlight, has_highlight);
             recorded
@@ -2240,7 +2240,7 @@ impl Renderer {
                     slots.push,
                     &GuidePush {
                         viewport: [map_extent.width as f32, map_extent.height as f32],
-                        selected_owner: interaction.selected.map(owner_words).unwrap_or([0; 2]),
+                        picked_owner: interaction.picked.map(owner_words).unwrap_or([0; 2]),
                         stripe_offset,
                     },
                 );
@@ -3645,12 +3645,12 @@ mod tests {
         outside.interaction.cursor = Some([640, 10]);
         assert!(!outside.is_animated());
 
-        let mut selected = map_view(rect);
-        selected.interaction.selected = Some(owner());
-        assert!(selected.is_animated());
+        let mut picked = map_view(rect);
+        picked.interaction.picked = Some(owner());
+        assert!(picked.is_animated());
 
-        selected.interaction.highlight = HighlightStyle::Tint;
-        assert!(!selected.is_animated());
+        picked.interaction.highlight = HighlightStyle::Tint;
+        assert!(!picked.is_animated());
 
         let guides = [GuideLine {
             origin: [0.0; 2],
@@ -3658,7 +3658,7 @@ mod tests {
         }];
         let guided = MapViewFrame {
             guide_lines: &guides,
-            interaction: selected.interaction,
+            interaction: picked.interaction,
             ..map_view(rect)
         };
         assert!(guided.is_animated(), "guide lines march in either highlight style");
@@ -3695,7 +3695,7 @@ mod tests {
         dynamic.camera.x = 32.0;
         dynamic.camera.zoom = 2.0;
         dynamic.interaction.cursor = Some([120, 80]);
-        dynamic.interaction.selected = Some(owner());
+        dynamic.interaction.picked = Some(owner());
         let dynamic = [dynamic];
 
         assert_eq!(

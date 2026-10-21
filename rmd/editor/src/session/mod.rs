@@ -61,7 +61,7 @@ pub(crate) use self::{
     frame::TypeLayer,
     git::GitDocState,
     guides::GuideBadge,
-    instance::{EditScope, SelectedTransform},
+    instance::{EditScope, PickedTransform},
     issues::MapIssueGroup,
     level::validate_level,
     node::NodeOverlay,

@@ -45,12 +45,12 @@ func owner_at(i32x2 pixel, u32 width, u32 height) -> u32x2 {
     return owner_for(visibility.Load(i32x3(pixel, 0)));
 }
 
-func is_highlighted_owner(u32x2 owner, u32x2 selected_owner, u32x2 hovered_owner) -> bool {
+func is_highlighted_owner(u32x2 owner, u32x2 picked_owner, u32x2 hovered_owner) -> bool {
     if (!any(owner != u32x2(0))) {
         return false;
     }
 
-    return (any(selected_owner != u32x2(0)) && same_owner(owner, selected_owner)) ||
+    return (any(picked_owner != u32x2(0)) && same_owner(owner, picked_owner)) ||
         (any(hovered_owner != u32x2(0)) && same_owner(owner, hovered_owner));
 }
 
@@ -94,7 +94,7 @@ func fs_main(
     VSOutput input,
     uniform u32x2 cursor,
     uniform u32 cursor_valid,
-    uniform u32x2 selected_owner,
+    uniform u32x2 picked_owner,
     uniform f32 stripe_offset,
     uniform u32x2 focused_area_owner,
     uniform u32 connected_count
@@ -115,13 +115,13 @@ func fs_main(
         }
     }
 
-    if (!any(selected_owner != u32x2(0)) && !any(hovered_owner != u32x2(0)) && connected_count == 0) {
+    if (!any(picked_owner != u32x2(0)) && !any(hovered_owner != u32x2(0)) && connected_count == 0) {
         discard;
     }
 
     let owner = owner_at(pixel, width, height);
-    let on_selected = any(selected_owner != u32x2(0)) && same_owner(owner, selected_owner);
-    if (on_selected) {
+    let on_picked = any(picked_owner != u32x2(0)) && same_owner(owner, picked_owner);
+    if (on_picked) {
         if (!HIGHLIGHT_TINT) {
             discard;
         }
@@ -155,7 +155,7 @@ func fs_main(
                 }
 
                 let neighbor = owner_at(pixel + i32x2(x, y), width, height);
-                if (is_highlighted_owner(neighbor, selected_owner, hovered_owner)) {
+                if (is_highlighted_owner(neighbor, picked_owner, hovered_owner)) {
                     nearest = i32x2(x, y);
                     nearest_distance = distance;
                 }

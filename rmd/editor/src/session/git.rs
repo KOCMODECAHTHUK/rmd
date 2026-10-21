@@ -367,7 +367,7 @@ impl Session {
         if !self.commit(
             ToolEdit {
                 edit,
-                selected: None,
+                picked: None,
                 affected,
             },
             Some(mark),

@@ -77,7 +77,7 @@ pub struct MapDocument {
     needs_initial_save: bool,
     /// Contents differ from the file on disk without any history, like a merge result
     pending_write: bool,
-    selected_instance: Option<PrefabInstanceId>,
+    picked_instance: Option<PrefabInstanceId>,
     selection: Option<Selection>,
     selection_mode: BlockSelectionMode,
     focus: Option<AreaFocus>,
@@ -260,7 +260,7 @@ impl MapDocument {
             z,
             needs_initial_save: false,
             pending_write: false,
-            selected_instance: None,
+            picked_instance: None,
             selection: None,
             selection_mode: BlockSelectionMode::Full,
             focus: None,
@@ -339,7 +339,7 @@ impl MapDocument {
         command::apply_unrecorded(&mut self.map, &edit);
         self.generation += 1;
         self.pending_write = true;
-        self.clear_stale_instance_selection();
+        self.clear_stale_picked_instance();
 
         affected
     }
@@ -443,15 +443,15 @@ impl MapDocument {
         self.map.prefab_instances()
     }
 
-    pub fn selected_instance(&self) -> Option<PrefabInstanceId> {
-        self.selected_instance.filter(|id| self.is_selectable_instance(*id))
+    pub fn picked_instance(&self) -> Option<PrefabInstanceId> {
+        self.picked_instance.filter(|id| self.is_pickable_instance(*id))
     }
 
-    pub fn select_instance(&mut self, selected: Option<PrefabInstanceId>) {
-        self.selected_instance = selected.filter(|id| self.is_selectable_instance(*id));
+    pub fn pick_instance(&mut self, picked: Option<PrefabInstanceId>) {
+        self.picked_instance = picked.filter(|id| self.is_pickable_instance(*id));
     }
 
-    fn is_selectable_instance(&self, id: PrefabInstanceId) -> bool {
+    fn is_pickable_instance(&self, id: PrefabInstanceId) -> bool {
         id.get() >= PREVIEW_ID_START || self.instance_location(id).is_some()
     }
 
@@ -715,7 +715,7 @@ impl MapDocument {
         }
 
         self.generation += 1;
-        self.clear_stale_instance_selection();
+        self.clear_stale_picked_instance();
 
         true
     }
@@ -751,7 +751,7 @@ impl MapDocument {
         }
 
         self.generation += 1;
-        self.clear_stale_instance_selection();
+        self.clear_stale_picked_instance();
 
         affected
     }
@@ -944,7 +944,7 @@ impl MapDocument {
     fn level_changed(&mut self, z: u32) {
         self.z = z.min(self.map.size().z).max(1);
         self.selection = None;
-        self.selected_instance = None;
+        self.picked_instance = None;
         self.focus = None;
     }
 
@@ -1006,9 +1006,9 @@ impl MapDocument {
         )
     }
 
-    fn clear_stale_instance_selection(&mut self) {
-        if self.selected_instance().is_none() {
-            self.selected_instance = None;
+    fn clear_stale_picked_instance(&mut self) {
+        if self.picked_instance().is_none() {
+            self.picked_instance = None;
         }
     }
 }
@@ -1301,13 +1301,13 @@ mod tests {
         let removed = Coord::new(2, 1, 2);
         let removed_ids = document.instance_ids_at(removed).to_vec();
         let table = document.instance_ids_at(Coord::new(1, 1, 1))[1];
-        document.select_instance(Some(document.instance_ids_at(removed)[1]));
+        document.pick_instance(Some(document.instance_ids_at(removed)[1]));
 
         assert!(document.resize(1, 1, &resize_fill()));
         assert_eq!(document.map.size().x, 1);
         assert_eq!(document.map.tile_at(removed), None);
         assert!(removed_ids.iter().all(|id| document.instance_location(*id).is_none()));
-        assert_eq!(document.selected_instance(), None);
+        assert_eq!(document.picked_instance(), None);
         assert!(document.instance_location(table).is_some());
 
         assert!(document.undo());
@@ -1345,9 +1345,9 @@ mod tests {
     fn deleted_instance_is_removed_from_selection() {
         let mut document = MapDocument::new(shared_tile_map(), 1);
         let coord = Coord::new(1, 1, 1);
-        let selected = document.instance_ids_at(coord)[1];
-        document.select_instance(Some(selected));
-        assert_eq!(document.selected_instance(), Some(selected));
+        let picked = document.instance_ids_at(coord)[1];
+        document.pick_instance(Some(picked));
+        assert_eq!(document.picked_instance(), Some(picked));
 
         let mut after = document.placed_tile(coord).unwrap();
         after.remove(1);
@@ -1355,7 +1355,7 @@ mod tests {
         edit.change(&document, coord, after);
         document.apply(edit);
 
-        assert_eq!(document.selected_instance(), None);
+        assert_eq!(document.picked_instance(), None);
     }
 
     #[test]
@@ -1365,13 +1365,13 @@ mod tests {
         let untouched = Coord::new(2, 1, 1);
         let id = document.instance_ids_at(changed)[1];
         let untouched_id = document.instance_ids_at(untouched)[1];
-        document.select_instance(Some(id));
+        document.pick_instance(Some(id));
 
         assert_eq!(
             document.set_instance_var(id, "name".into(), core::types::Value::Text("selected".into())),
             Some(true),
         );
-        assert_eq!(document.selected_instance(), Some(id));
+        assert_eq!(document.picked_instance(), Some(id));
         assert_eq!(document.instance_ids_at(changed)[1], id);
         assert_eq!(document.instance_ids_at(untouched)[1], untouched_id);
         assert_eq!(
@@ -1405,7 +1405,7 @@ mod tests {
                 .and_then(|instance| instance.prefab().var(&"name".into())),
             None
         );
-        assert_eq!(document.selected_instance(), Some(id));
+        assert_eq!(document.picked_instance(), Some(id));
 
         assert!(document.redo());
         assert_eq!(

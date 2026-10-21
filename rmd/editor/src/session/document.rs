@@ -127,7 +127,7 @@ impl Session {
 
         if self.state.tool == Tool::Node && !self.node_tool_available() {
             self.cancel_node_edit();
-            self.state.tool = Tool::Select;
+            self.state.tool = Tool::Pick;
         }
 
         closed

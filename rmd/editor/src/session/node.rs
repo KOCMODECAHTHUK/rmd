@@ -181,7 +181,7 @@ impl Session {
             drag: None,
         });
         self.state.tool = Tool::Node;
-        self.select_instance(Some(target));
+        self.pick_instance(Some(target));
 
         true
     }
@@ -457,7 +457,7 @@ impl Session {
 
             (!edit.is_empty()).then_some(ToolEdit {
                 edit,
-                selected: None,
+                picked: None,
                 affected,
             })
         };
@@ -549,7 +549,7 @@ impl Session {
                 }) else {
                     continue;
                 };
-                let Some(selected) = placement.selected else {
+                let Some(selected) = placement.picked else {
                     continue;
                 };
                 edit.changes.extend(placement.edit.changes);
@@ -560,7 +560,7 @@ impl Session {
 
             (!edit.is_empty()).then_some(ToolEdit {
                 edit,
-                selected: None,
+                picked: None,
                 affected,
             })
         };
@@ -639,7 +639,7 @@ impl Session {
                     }) else {
                         return false;
                     };
-                    let Some(id) = placement.selected else {
+                    let Some(id) = placement.picked else {
                         return false;
                     };
                     let Some(tile) = placement
@@ -695,7 +695,7 @@ impl Session {
 
             (!edit.is_empty()).then_some(ToolEdit {
                 edit,
-                selected: None,
+                picked: None,
                 affected,
             })
         };
@@ -772,14 +772,14 @@ mod tests {
         session.caches.get_mut(&id).unwrap().bake = bake;
         session.rebuild_instances(id);
         assert!(eligibility(&session));
-        session.select_instance(Some(other));
+        session.pick_instance(Some(other));
         let view = session
             .map_view_frame(
                 id,
                 Default::default(),
                 Default::default(),
                 render::MapViewInteraction {
-                    selected: Some(other),
+                    picked: Some(other),
                     mode: render::InteractionMode::Node { pick: None },
                     ..Default::default()
                 },
@@ -787,7 +787,7 @@ mod tests {
                 &[],
             )
             .unwrap();
-        assert_eq!(view.interaction.selected, None);
+        assert_eq!(view.interaction.picked, None);
     }
 
     #[test]
@@ -809,7 +809,7 @@ mod tests {
         let overlay = session.node_overlay().unwrap();
         assert!(!session.select_node_from_pick(render::PickResult::Hit(other)));
         assert!(!session.select_node_from_pick(render::PickResult::Miss));
-        assert_eq!(session.selected_instance(), Some(seed));
+        assert_eq!(session.picked_instance(), Some(seed));
         assert_eq!(session.node_overlay(), Some(overlay));
     }
 

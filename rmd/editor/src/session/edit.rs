@@ -53,7 +53,7 @@ impl Session {
         if tool == Tool::BlockSelect
             && let Some(document) = self.state.active_document_mut()
         {
-            document.select_instance(None);
+            document.pick_instance(None);
         }
     }
 
@@ -88,17 +88,17 @@ impl Session {
                 }),
             }
         }?;
-        let selected = action.selected?;
+        let picked = action.picked?;
         if !self.commit(action, group) {
             return None;
         }
 
         if let Some(document) = self.state.active_document_mut() {
-            document.select_instance(Some(selected));
+            document.pick_instance(Some(picked));
         }
         self.state.choose_prefab(prefab);
 
-        Some(selected)
+        Some(picked)
     }
 
     pub fn fill_at(&mut self, coord: Coord, fill_mode: FillMode, custom_fill_boundaries: &[TreePath]) -> FillOutcome {
@@ -171,8 +171,8 @@ impl Session {
             .is_some_and(|action| self.commit(action, None))
     }
 
-    pub fn delete_selected_instance(&mut self) -> bool {
-        self.selected_instance()
+    pub fn delete_picked_instance(&mut self) -> bool {
+        self.picked_instance()
             .and_then(|target| self.build_delete(target))
             .is_some_and(|action| self.commit(action, None))
     }
@@ -347,7 +347,7 @@ impl Session {
 
         if let Some(document) = self.state.active_document_mut() {
             document.set_selection(Some(after.bounds), after.mode);
-            document.select_instance(None);
+            document.pick_instance(None);
         }
 
         true
@@ -426,9 +426,9 @@ mod tests {
         session.toggle_focus_at(Some(seed));
 
         let neighbor_area = area_at(&session, neighbor).unwrap();
-        session.select_instance(Some(neighbor_area));
+        session.pick_instance(Some(neighbor_area));
         assert_eq!(
-            session.set_selected_instance_var("name".into(), Value::Text(String::from("Engineering"))),
+            session.set_picked_instance_var("name".into(), Value::Text(String::from("Engineering"))),
             Some(true),
         );
         assert!(session.focused_area().is_some());
@@ -436,9 +436,9 @@ mod tests {
         assert!(!session.can_edit_at(neighbor));
 
         let seed_area = area_at(&session, seed).unwrap();
-        session.select_instance(Some(seed_area));
+        session.pick_instance(Some(seed_area));
         assert_eq!(
-            session.set_selected_instance_var("name".into(), Value::Text(String::from("Engineering"))),
+            session.set_picked_instance_var("name".into(), Value::Text(String::from("Engineering"))),
             Some(true),
         );
         assert_eq!(session.focused_area(), None);
@@ -451,11 +451,11 @@ mod tests {
         session.load_environment(&root.join("test.dme")).unwrap();
         session.open_map(&root.join("test.dmm"), 1).unwrap();
         let area = area_at(&session, Coord::new(3, 3, 1)).unwrap();
-        session.select_instance(Some(area));
+        session.pick_instance(Some(area));
         let revision = session.revision();
 
         assert_eq!(
-            session.set_selected_instance_var("name".into(), Value::Text(String::from("Engineering"))),
+            session.set_picked_instance_var("name".into(), Value::Text(String::from("Engineering"))),
             Some(true),
         );
         assert_eq!(session.revision(), revision.wrapping_add(1));
@@ -541,16 +541,16 @@ mod tests {
             .copied()
             .unwrap();
         let before_len = session.map().unwrap().tile_at(coord).unwrap().len();
-        session.select_instance(Some(target));
+        session.pick_instance(Some(target));
 
         assert!(!session.delete_instance(target));
-        assert_eq!(session.selected_instance(), Some(target));
+        assert_eq!(session.picked_instance(), Some(target));
 
         session.set_tool(Tool::Delete);
         let revision = session.revision();
         assert!(session.delete_instance(target));
         assert_eq!(session.map().unwrap().tile_at(coord).unwrap().len(), before_len - 1);
-        assert_eq!(session.selected_instance(), None);
+        assert_eq!(session.picked_instance(), None);
         assert_eq!(session.state.active_document().unwrap().instance_location(target), None);
         assert!(
             session
@@ -635,19 +635,19 @@ mod tests {
         assert!(session.choose_type(wall));
         assert_eq!(session.place_at(coord, None), Some(turf_id));
         assert_eq!(session.place_at(coord, None), None);
-        assert_eq!(session.selected_instance(), Some(turf_id));
+        assert_eq!(session.picked_instance(), Some(turf_id));
         assert_eq!(
-            session.selected_prefab().unwrap().path,
+            session.picked_prefab().unwrap().path,
             TreePath::parse("/turf/closed/wall")
         );
 
         assert_eq!(
-            session.set_selected_instance_var("name".into(), Value::Text("custom wall".into())),
+            session.set_picked_instance_var("name".into(), Value::Text("custom wall".into())),
             Some(true)
         );
-        session.set_tool(Tool::Select);
-        session.select_instance(Some(turf_id));
-        assert_eq!(session.tool(), Tool::Select);
+        session.set_tool(Tool::Pick);
+        session.pick_instance(Some(turf_id));
+        assert_eq!(session.tool(), Tool::Pick);
         assert_eq!(
             session.palette().unwrap().var(&"name".into()),
             Some(&Value::Text("custom wall".into()))
@@ -683,9 +683,9 @@ mod tests {
             [first, second]
         );
 
-        session.select_instance(Some(first));
+        session.pick_instance(Some(first));
         assert_eq!(
-            session.set_selected_instance_var("name".into(), Value::Text("custom table".into())),
+            session.set_picked_instance_var("name".into(), Value::Text("custom table".into())),
             Some(true)
         );
         assert!(session.reset_instance_to_default(first));

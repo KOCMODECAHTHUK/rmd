@@ -386,8 +386,8 @@ impl UiState {
         self.coop_notice.reset();
     }
 
-    pub fn reveal_selected_instance(&mut self, session: &Session) {
-        self.object_tree.reveal_selected_instance(session);
+    pub fn reveal_picked_instance(&mut self, session: &Session) {
+        self.object_tree.reveal_picked_instance(session);
     }
 
     pub fn request_mouse_popup(&mut self) {
@@ -721,7 +721,7 @@ impl UiState {
             match session
                 .state
                 .active_document()
-                .and_then(|document| Some((document.id(), document.selected_instance()?)))
+                .and_then(|document| Some((document.id(), document.picked_instance()?)))
             {
                 Some((document, instance)) => {
                     self.find

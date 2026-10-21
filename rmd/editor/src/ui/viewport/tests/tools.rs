@@ -23,7 +23,7 @@ fn node_tool_hover_and_single_click_survive_the_full_view_frame() {
     assert_eq!(app.interaction.mode.pick(), Some(PickRequest::NodeSelect));
     assert!(!app.session.node_dragging());
     assert!(app.session.select_node_from_pick(render::PickResult::Hit(seed)));
-    assert_eq!(app.session.selected_instance(), Some(seed));
+    assert_eq!(app.session.picked_instance(), Some(seed));
     assert!(app.session.node_overlay().is_some());
 }
 
@@ -32,12 +32,12 @@ fn selection_keeps_its_double_click_node_shortcut() {
     let _guard = IMGUI_CONTEXT.lock().unwrap();
     let coord = Coord::new(5, 8, 1);
     let (mut session, _) = node_session(node_map(20, 20, &[(coord, vec!["/obj/cable"])]), coord);
-    session.set_tool(Tool::Select);
+    session.set_tool(Tool::Pick);
     let mut app = RectangleUiHarness::with_session(session);
     let point = app.tile(coord.x, coord.y);
     app.pointer(point, false);
     app.pointer(point, true);
-    assert_eq!(app.interaction.mode.pick(), Some(PickRequest::Select));
+    assert_eq!(app.interaction.mode.pick(), Some(PickRequest::Pick));
     app.pointer(point, false);
     app.pointer(point, true);
     assert_eq!(app.interaction.mode.pick(), Some(PickRequest::NodeSeed(coord)));
@@ -63,7 +63,7 @@ fn node_handles_start_a_drag_instead_of_requesting_a_new_pick() {
 fn right_click_captures_the_clicked_tile_in_every_tool() {
     let _guard = IMGUI_CONTEXT.lock().unwrap();
     for tool in [
-        Tool::Select,
+        Tool::Pick,
         Tool::Place,
         Tool::Node,
         Tool::BlockSelect,
@@ -170,7 +170,7 @@ fn object_gizmo_only_appears_on_the_selected_instances_z_level() {
         Prefab::new(TreePath::parse("/turf/open/floor")),
         Prefab::new(TreePath::parse("/area/station")),
     ]);
-    let selected_tile = map.intern_tile(vec![
+    let picked_tile = map.intern_tile(vec![
         Prefab::new(TreePath::parse("/obj/structure/table")),
         Prefab::new(TreePath::parse("/turf/open/floor")),
         Prefab::new(TreePath::parse("/area/station")),
@@ -180,7 +180,7 @@ fn object_gizmo_only_appears_on_the_selected_instances_z_level() {
             row.fill(base);
         }
     }
-    map.grid[0][2][5] = selected_tile;
+    map.grid[0][2][5] = picked_tile;
     session.apply_map(crate::loader::LoadedMap {
         path: PathBuf::from("object-gizmo-z-level-test.dmm"),
         map,
@@ -189,13 +189,13 @@ fn object_gizmo_only_appears_on_the_selected_instances_z_level() {
         repo: None,
         conflict: None,
     });
-    let selected = session.state.active_document().unwrap().instance_ids_at(coord)[0];
-    session.select_instance(Some(selected));
+    let picked = session.state.active_document().unwrap().instance_ids_at(coord)[0];
+    session.pick_instance(Some(picked));
 
     let mut camera = Controller::new();
     camera.resize(800, 600);
     camera.center_on_tile(coord, session.options.tile_size);
-    let sprite = session.selected_transform().unwrap().sprite;
+    let sprite = session.picked_transform().unwrap().sprite;
     let origin = camera.map_to_screen([sprite.x + sprite.width * 0.5, sprite.y + sprite.height * 0.5]);
     let mut gizmo = GizmoState::default();
     let settings = Settings::default();
@@ -207,7 +207,7 @@ fn object_gizmo_only_appears_on_the_selected_instances_z_level() {
     assert!(gizmo.is_interacting());
 
     assert_eq!(session.change_level(1), LevelChange::Changed);
-    assert_eq!(session.selected_instance(), Some(selected));
+    assert_eq!(session.picked_instance(), Some(picked));
     let (hidden, hidden_vertices) = object_gizmo_frame(&mut context, &mut gizmo, &mut session, &camera, &settings);
     assert!(!hidden.captures_mouse);
     assert!(!gizmo.is_interacting());
@@ -251,13 +251,13 @@ fn ctrl_dragging_an_object_onto_another_tile_keeps_its_area_last() {
         repo: None,
         conflict: None,
     });
-    let selected = session.state.active_document().unwrap().instance_ids_at(start)[0];
-    session.select_instance(Some(selected));
+    let picked = session.state.active_document().unwrap().instance_ids_at(start)[0];
+    session.pick_instance(Some(picked));
 
     let mut camera = Controller::new();
     camera.resize(800, 600);
     camera.center_on_tile(start, session.options.tile_size);
-    let sprite = session.selected_transform().unwrap().sprite;
+    let sprite = session.picked_transform().unwrap().sprite;
     let center = [sprite.x + sprite.width * 0.5, sprite.y + sprite.height * 0.5];
     let mut gizmo = GizmoState::default();
     let settings = Settings::default();
@@ -278,7 +278,7 @@ fn ctrl_dragging_an_object_onto_another_tile_keeps_its_area_last() {
 
     let document = session.state.active_document().unwrap();
     assert_eq!(
-        document.instance_location(selected).map(|location| location.coord),
+        document.instance_location(picked).map(|location| location.coord),
         Some(above)
     );
     let paths = document
@@ -381,7 +381,7 @@ fn a_tapped_tool_key_switches_tools_and_a_held_one_hands_the_old_tool_back() {
     let mut app = RectangleUiHarness::new();
     let table = Prefab::new(TreePath::parse("/obj/structure/table"));
     app.session.state.choose_prefab(table.clone());
-    app.session.set_tool(Tool::Select);
+    app.session.set_tool(Tool::Pick);
     let tile = app.tile(5, 8);
     app.pointer(tile, false);
 
@@ -389,13 +389,13 @@ fn a_tapped_tool_key_switches_tools_and_a_held_one_hands_the_old_tool_back() {
     app.key(Key::W, false);
     assert_eq!(app.session.tool(), Tool::Place, "a tap keeps the new tool");
 
-    app.session.set_tool(Tool::Select);
+    app.session.set_tool(Tool::Pick);
     app.key(Key::W, true);
     assert_eq!(app.session.tool(), Tool::Place);
     app.pointer(tile, true);
     app.pointer(tile, false);
     app.key(Key::W, false);
-    assert_eq!(app.session.tool(), Tool::Select, "releasing after a click goes back");
+    assert_eq!(app.session.tool(), Tool::Pick, "releasing after a click goes back");
     assert!(
         app.session
             .map()

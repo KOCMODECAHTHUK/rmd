@@ -1974,8 +1974,8 @@ mod tests {
         assert_eq!(session.declared_directions(&path), Some(cardinals));
         assert_eq!(pipe_dir(&session), Some(1));
 
-        session.select_instance(Some(instance));
-        session.edit_selected_instance_vars(
+        session.pick_instance(Some(instance));
+        session.edit_picked_instance_vars(
             "set dir",
             &[editor::document::VarMutation::Set("dir".into(), Value::Num(4.0))],
             None,
@@ -2353,7 +2353,7 @@ mod tests {
             .expect("an instance to delete");
 
         session.set_tool(Tool::Delete);
-        session.select_instance(Some(target));
+        session.pick_instance(Some(target));
 
         assert!(session.delete_instance(target));
         assert!(session.baker.invalidated(id));

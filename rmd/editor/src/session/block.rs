@@ -232,7 +232,7 @@ impl Session {
                     .all(|coord| document.allows_select_at(coord))
         });
         document.set_selection(selection, selection_mode);
-        document.select_instance(None);
+        document.pick_instance(None);
         self.floating_paste = None;
 
         selection.is_some()
@@ -548,14 +548,14 @@ mod tests {
         let inside = Coord::new(1, 1, 1);
         let outside = Coord::new(3, 1, 1);
         let object = session.state.active_document().unwrap().instance_ids_at(inside)[0];
-        session.select_instance(Some(object));
+        session.pick_instance(Some(object));
         session.set_tool(Tool::BlockSelect);
-        assert_eq!(session.selected_instance(), None);
+        assert_eq!(session.picked_instance(), None);
         session.toggle_focus_at(Some(inside));
 
         assert!(!session.select_block(Some(Selection::from_drag(inside, outside))));
         assert_eq!(session.selection(), None);
-        assert_eq!(session.selected_instance(), None);
+        assert_eq!(session.picked_instance(), None);
         assert!(session.select_block(Some(Selection::from_drag(inside, Coord::new(2, 1, 1)))));
         assert_eq!(
             session.selection(),

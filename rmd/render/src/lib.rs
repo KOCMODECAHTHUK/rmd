@@ -66,7 +66,7 @@ impl HighlightStyle {
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct MapViewInteraction {
     pub cursor: Option<[u32; 2]>,
-    pub selected: Option<PrefabInstanceId>,
+    pub picked: Option<PrefabInstanceId>,
     pub placement_flash: Option<PlacementFlash>,
     pub highlight: HighlightStyle,
     pub mode: InteractionMode,
@@ -77,7 +77,7 @@ pub struct MapViewInteraction {
 pub enum InteractionMode {
     #[default]
     Place,
-    Select {
+    Pick {
         pick: Option<PickRequest>,
     },
     Node {
@@ -92,7 +92,7 @@ impl InteractionMode {
     pub const fn pick(self) -> Option<PickRequest> {
         match self {
             Self::Place => None,
-            Self::Select { pick } | Self::Node { pick } | Self::Delete { pick } => pick,
+            Self::Pick { pick } | Self::Node { pick } | Self::Delete { pick } => pick,
         }
     }
 
@@ -107,7 +107,7 @@ impl InteractionMode {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PickRequest {
-    Select,
+    Pick,
     Delete,
     Replace,
     NodeSelect,
@@ -232,7 +232,7 @@ impl MapViewFrame<'_> {
             .cursor
             .is_some_and(|cursor| cursor[0] < self.rect.width && cursor[1] < self.rect.height);
         let is_outlined =
-            !self.interaction.highlight.is_tint() && (self.interaction.selected.is_some() || is_cursor_inside);
+            !self.interaction.highlight.is_tint() && (self.interaction.picked.is_some() || is_cursor_inside);
 
         is_outlined || !self.guide_lines.is_empty()
     }

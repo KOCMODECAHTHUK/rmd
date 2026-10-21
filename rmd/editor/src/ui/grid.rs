@@ -3,7 +3,7 @@ use editor::document::DocumentId;
 
 use crate::{
     camera::Controller,
-    session::{SelectedTransform, Session},
+    session::{PickedTransform, Session},
 };
 
 const TILE_GRID_COLOR: [f32; 4] = [1.0, 1.0, 1.0, 0.12];
@@ -92,7 +92,7 @@ pub(super) fn draw_tile_grid(
 
 #[allow(clippy::too_many_arguments)]
 pub(super) fn draw_selected_pixel_grid(
-    ui: &Ui, camera: &Controller, transform: &SelectedTransform, tile_size: u32, min_pixels: u32, show_axis: bool,
+    ui: &Ui, camera: &Controller, transform: &PickedTransform, tile_size: u32, min_pixels: u32, show_axis: bool,
     viewport_min: [f32; 2], viewport_max: [f32; 2],
 ) {
     let tile_size = tile_size.max(1) as f32;

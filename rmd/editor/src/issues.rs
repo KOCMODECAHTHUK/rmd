@@ -100,7 +100,7 @@ pub fn replace_instances(
 
     Some(ToolEdit {
         edit,
-        selected: None,
+        picked: None,
         affected,
     })
 }

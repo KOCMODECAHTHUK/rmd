@@ -594,13 +594,13 @@ impl App {
                 session.set_active_document(document);
             }
             match request {
-                PickRequest::Select => match pick {
+                PickRequest::Pick => match pick {
                     PickResult::Hit(owner) => {
-                        session.select_instance(Some(owner));
-                        ui.reveal_selected_instance(session);
+                        session.pick_instance(Some(owner));
+                        ui.reveal_picked_instance(session);
                         ui.request_mouse_popup();
                     },
-                    PickResult::Miss => session.select_instance(None),
+                    PickResult::Miss => session.pick_instance(None),
                 },
                 PickRequest::Delete => {
                     if let PickResult::Hit(owner) = pick {

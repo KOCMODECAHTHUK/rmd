@@ -13,18 +13,18 @@ pub(crate) struct GuideBadge {
 }
 
 #[derive(Debug, Default)]
-pub(crate) struct SelectionGuides {
+pub(crate) struct PickGuides {
     pub lines: Vec<GuideLine>,
     pub badges: Vec<GuideBadge>,
     pub connected: Vec<PrefabInstanceId>,
 }
 
 impl Session {
-    pub(crate) fn selected_offset_guide(&self) -> Option<GuideLine> {
+    pub(crate) fn picked_offset_guide(&self) -> Option<GuideLine> {
         let environment = self.state.environment.as_ref()?;
         let document = self.state.active_document()?;
-        let selected = document.selected_instance()?;
-        let instance = document.prefab_instance(selected)?;
+        let picked = document.picked_instance()?;
+        let instance = document.prefab_instance(picked)?;
         let prefab = instance.prefab();
         let location = instance.location;
         if location.coord.z != document.z {
@@ -47,7 +47,7 @@ impl Session {
             return None;
         }
 
-        let sprite = self.instances()?.sprite(selected)?;
+        let sprite = self.instances()?.sprite(picked)?;
         let tile_size = self.options.tile_size.max(1) as f32;
 
         Some(GuideLine {
@@ -59,9 +59,9 @@ impl Session {
         })
     }
 
-    pub(crate) fn selected_guides(&self) -> SelectionGuides {
-        let mut guides = SelectionGuides::default();
-        if let Some(offset) = self.selected_offset_guide() {
+    pub(crate) fn picked_guides(&self) -> PickGuides {
+        let mut guides = PickGuides::default();
+        if let Some(offset) = self.picked_offset_guide() {
             guides.lines.push(offset);
         }
 
@@ -71,14 +71,14 @@ impl Session {
         let Some(document) = self.state.document(document_id) else {
             return guides;
         };
-        let Some(selected) = document.selected_instance() else {
+        let Some(picked) = document.picked_instance() else {
             return guides;
         };
-        let Some(selected_location) = document.instance_location(selected) else {
+        let Some(picked_location) = document.instance_location(picked) else {
             return guides;
         };
 
-        if selected_location.coord.z != document.z {
+        if picked_location.coord.z != document.z {
             return guides;
         }
 
@@ -98,10 +98,10 @@ impl Session {
             )
         };
 
-        let selected_center = center(selected, selected_location.coord);
+        let pick_center = center(picked, picked_location.coord);
         let mut badged = HashSet::new();
 
-        for connected in bake.connections(selected.get()) {
+        for connected in bake.connections(picked.get()) {
             let Some(connected) = PrefabInstanceId::from_raw(connected) else {
                 continue;
             };
@@ -110,7 +110,7 @@ impl Session {
             };
             let target = center(connected, location.coord);
             guides.lines.push(GuideLine {
-                origin: selected_center,
+                origin: pick_center,
                 target,
             });
             guides.connected.push(connected);
@@ -149,17 +149,17 @@ mod tests {
         session.load_environment(&root.join("test.dme")).unwrap();
         session.open_map(&root.join("test.dmm"), 1).unwrap();
         let coord = Coord::new(6, 3, 1);
-        let selected = session
+        let picked = session
             .state
             .active_document()
             .and_then(|document| document.instance_ids_at(coord).first())
             .copied()
             .unwrap();
-        session.select_instance(Some(selected));
+        session.pick_instance(Some(picked));
 
-        assert_eq!(session.selected_offset_guide(), None);
+        assert_eq!(session.picked_offset_guide(), None);
         assert_eq!(
-            session.edit_selected_instance_vars(
+            session.edit_picked_instance_vars(
                 "offset selected object",
                 &[
                     VarMutation::Set("step_x".into(), Value::Num(-2.0)),
@@ -174,15 +174,15 @@ mod tests {
             Some(true),
         );
 
-        let guide = session.selected_offset_guide().unwrap();
+        let guide = session.picked_offset_guide().unwrap();
         assert_eq!(guide.origin, [176.0, 80.0]);
         assert_eq!(guide.target, [180.0, 81.0]);
 
         session.state.active_document_mut().unwrap().z = 2;
-        assert_eq!(session.selected_offset_guide(), None);
+        assert_eq!(session.picked_offset_guide(), None);
         session.state.active_document_mut().unwrap().z = 1;
         assert_eq!(
-            session.edit_selected_instance_vars(
+            session.edit_picked_instance_vars(
                 "cancel selected object offset",
                 &[
                     VarMutation::Set("step_x".into(), Value::Num(-5.0)),
@@ -196,7 +196,7 @@ mod tests {
             ),
             Some(true),
         );
-        assert_eq!(session.selected_offset_guide(), None);
+        assert_eq!(session.picked_offset_guide(), None);
     }
 
     #[test]
@@ -286,9 +286,9 @@ mod tests {
         };
         let source = endpoint(&session, Coord::new(1, 1, 1), "/obj/source");
         let same_level = endpoint(&session, Coord::new(3, 1, 1), "/obj/target");
-        session.select_instance(Some(source));
+        session.pick_instance(Some(source));
 
-        let guides = session.selected_guides();
+        let guides = session.picked_guides();
         assert_eq!(guides.lines.len(), 3, "one offset guide and two connections");
         assert!(guides.lines.contains(&GuideLine {
             origin: [16.0, 16.0],
@@ -338,8 +338,8 @@ mod tests {
             "a selection-only highlight is not repeated by hovering its own tile"
         );
 
-        session.select_instance(Some(same_level));
-        let reverse = session.selected_guides();
+        session.pick_instance(Some(same_level));
+        let reverse = session.picked_guides();
         assert_eq!(
             reverse.lines,
             vec![GuideLine {
@@ -355,10 +355,10 @@ mod tests {
         );
 
         assert_eq!(
-            session.set_selected_instance_var("channel".into(), Value::Text(String::from("other"))),
+            session.set_picked_instance_var("channel".into(), Value::Text(String::from("other"))),
             Some(true),
         );
-        let disconnected = session.selected_guides();
+        let disconnected = session.picked_guides();
         assert!(disconnected.lines.is_empty());
         assert!(disconnected.connected.is_empty());
 

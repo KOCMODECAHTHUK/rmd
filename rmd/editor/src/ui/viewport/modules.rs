@@ -219,7 +219,7 @@ pub(super) fn draw(
                 .map_or(0, |index| (index + 1) % hovered.len());
             let root = hovered.get(index).unwrap_or(first);
             let source = session.source_root(root);
-            if is_gizmo_hot && source.is_some() && session.selected_instance() == source {
+            if is_gizmo_hot && source.is_some() && session.picked_instance() == source {
                 return ModuleControls {
                     is_capturing: false,
                     open,
@@ -227,10 +227,10 @@ pub(super) fn draw(
             }
 
             frame.gestures.module_popup = Some((root.key.clone(), root.coord));
-            if session.tool() == Tool::Select
+            if session.tool() == Tool::Pick
                 && let Some(id) = source
             {
-                session.select_instance(Some(id));
+                session.pick_instance(Some(id));
             }
             captured = true;
         } else {

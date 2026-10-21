@@ -28,8 +28,8 @@ pub(crate) enum EditScope {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct SelectedTransform {
-    pub selected: PrefabInstanceId,
+pub(crate) struct PickedTransform {
+    pub picked: PrefabInstanceId,
     pub sprite: SpriteInstance,
     pub pixel: [i32; 2],
     pub step: [i32; 2],
@@ -41,40 +41,40 @@ pub(crate) struct SelectedTransform {
 }
 
 impl Session {
-    pub fn selected_instance(&self) -> Option<PrefabInstanceId> {
-        self.state.active_document().and_then(MapDocument::selected_instance)
+    pub fn picked_instance(&self) -> Option<PrefabInstanceId> {
+        self.state.active_document().and_then(MapDocument::picked_instance)
     }
 
-    pub fn selected_prefab(&self) -> Option<&Prefab> {
+    pub fn picked_prefab(&self) -> Option<&Prefab> {
         let active = self.state.active()?;
-        let selected = self.state.active_document()?.selected_instance()?;
+        let picked = self.state.active_document()?.picked_instance()?;
 
         self.effective_grid(active)?
-            .prefab_instance(selected)
+            .prefab_instance(picked)
             .map(|instance| instance.prefab())
     }
 
-    pub fn selected_location(&self) -> Option<PrefabLocation> {
+    pub fn picked_location(&self) -> Option<PrefabLocation> {
         let active = self.state.active()?;
-        let selected = self.state.active_document()?.selected_instance()?;
+        let picked = self.state.active_document()?.picked_instance()?;
 
-        self.effective_grid(active)?.location(selected)
+        self.effective_grid(active)?.location(picked)
     }
 
-    pub(crate) fn gizmo_transform(&self) -> Option<SelectedTransform> {
-        if self.tool() != Tool::Select {
+    pub(crate) fn gizmo_transform(&self) -> Option<PickedTransform> {
+        if self.tool() != Tool::Pick {
             return None;
         }
 
-        self.selected_transform()
+        self.picked_transform()
             .filter(|transform| transform.sprite.z == self.z())
     }
 
-    pub(crate) fn selected_transform(&self) -> Option<SelectedTransform> {
+    pub(crate) fn picked_transform(&self) -> Option<PickedTransform> {
         let environment = self.state.environment.as_ref()?;
         let document = self.state.active_document()?;
-        let selected = document.selected_instance()?;
-        let prefab = document.prefab_instance(selected)?.prefab();
+        let picked = document.picked_instance()?;
+        let prefab = document.prefab_instance(picked)?.prefab();
         let id = environment.tree.id_of(&prefab.path)?;
         let atom = environment.tree.roots().atom?;
         if !environment.tree.is_subtype_of(id, atom) {
@@ -89,9 +89,9 @@ impl Session {
             .is_some_and(|movable| environment.tree.is_subtype_of(id, movable));
         let direction = direction_state(environment, id, &appearance, self.declared_directions(&prefab.path));
 
-        Some(SelectedTransform {
-            selected,
-            sprite: *self.instances()?.sprite(selected)?,
+        Some(PickedTransform {
+            picked,
+            sprite: *self.instances()?.sprite(picked)?,
             pixel: [appearance.pixel_x, appearance.pixel_y],
             step: [appearance.step_x, appearance.step_y],
             is_movable,
@@ -102,16 +102,16 @@ impl Session {
         })
     }
 
-    pub fn select_instance(&mut self, selected: Option<PrefabInstanceId>) {
+    pub fn pick_instance(&mut self, picked: Option<PrefabInstanceId>) {
         let prefab = self.state.active().and_then(|active| {
-            let selected = selected?;
+            let picked = picked?;
 
             self.effective_grid(active)?
-                .prefab_instance(selected)
+                .prefab_instance(picked)
                 .map(|instance| instance.prefab().clone())
         });
         if let Some(document) = self.state.active_document_mut() {
-            document.select_instance(selected);
+            document.pick_instance(picked);
         }
         if let Some(prefab) = prefab {
             self.state.choose_prefab(prefab);
@@ -119,15 +119,15 @@ impl Session {
     }
 
     #[cfg(test)]
-    pub fn set_selected_instance_var(
+    pub fn set_picked_instance_var(
         &mut self, name: core::types::Identifier, value: core::types::Value,
     ) -> Option<bool> {
         let label = format!("set {name}");
 
-        self.edit_selected_instance_vars(label, &[VarMutation::Set(name, value)], None)
+        self.edit_picked_instance_vars(label, &[VarMutation::Set(name, value)], None)
     }
 
-    pub fn edit_selected_instance_vars(
+    pub fn edit_picked_instance_vars(
         &mut self, label: impl Into<String>, mutations: &[VarMutation], group: Option<EditGroupId>,
     ) -> Option<bool> {
         self.edit_instance_vars_in(EditScope::Selected, label, mutations, group)
@@ -160,7 +160,7 @@ impl Session {
     }
 
     fn scope_targets(&mut self, scope: EditScope) -> Option<Vec<PrefabInstanceId>> {
-        let selected = self.selected_instance()?;
+        let picked = self.picked_instance()?;
         let mut targets = match scope {
             EditScope::Selected => Vec::new(),
             EditScope::Identical => {
@@ -168,8 +168,8 @@ impl Session {
                 self.identical().to_vec()
             },
         };
-        if !targets.contains(&selected) {
-            targets.push(selected);
+        if !targets.contains(&picked) {
+            targets.push(picked);
         }
 
         Some(targets)
@@ -187,13 +187,13 @@ impl Session {
         let Some(document) = self.state.active_document() else {
             return Vec::new();
         };
-        let selected = document.selected_instance();
+        let picked = document.picked_instance();
         let tile = self.options.tile_size.max(1) as f32;
         let instances = self.instances();
 
         self.identical()
             .iter()
-            .filter(|id| Some(**id) != selected)
+            .filter(|id| Some(**id) != picked)
             .filter_map(|id| {
                 let location = document.instance_location(*id)?;
                 if location.coord.z != document.z {
@@ -219,8 +219,8 @@ impl Session {
             return;
         };
         let Some(instance) = document
-            .selected_instance()
-            .and_then(|selected| document.prefab_instance(selected))
+            .picked_instance()
+            .and_then(|picked| document.prefab_instance(picked))
         else {
             self.identical = None;
             return;
@@ -248,23 +248,23 @@ impl Session {
         }
     }
 
-    pub fn move_selected_instance(
+    pub fn move_picked_instance(
         &mut self, to_coord: Coord, label: impl Into<String>, mutations: &[VarMutation], group: Option<EditGroupId>,
     ) -> Option<bool> {
-        let selected = self.selected_instance()?;
+        let picked = self.picked_instance()?;
         let (environment, document) = self.state.active_pair_mut()?;
 
-        let changed = document.move_instance(&environment.tree, selected, to_coord, label, mutations, group)?;
+        let changed = document.move_instance(&environment.tree, picked, to_coord, label, mutations, group)?;
 
         if changed {
-            self.update_instance(selected);
+            self.update_instance(picked);
         }
 
         Some(changed)
     }
 
-    pub fn selected_instance_of(&self, id: DocumentId) -> Option<PrefabInstanceId> {
-        self.state.document(id).and_then(MapDocument::selected_instance)
+    pub fn picked_instance_of(&self, id: DocumentId) -> Option<PrefabInstanceId> {
+        self.state.document(id).and_then(MapDocument::picked_instance)
     }
 }
 
@@ -315,7 +315,7 @@ mod tests {
         let mut other = table.clone();
         other.set_var("name".into(), Value::Text(String::from("Other")));
         let ids = place(&mut session, &[(1, &table), (2, &table), (3, &other), (4, &table)]);
-        session.select_instance(Some(ids[0]));
+        session.pick_instance(Some(ids[0]));
         session.refresh_identical();
         assert_eq!(session.identical().len(), 3);
 
@@ -345,12 +345,12 @@ mod tests {
         let mut session = focus_session();
         let table = Prefab::new(TreePath::parse("/obj/structure/table"));
         let ids = place(&mut session, &[(1, &table), (4, &table)]);
-        session.select_instance(Some(ids[0]));
+        session.pick_instance(Some(ids[0]));
         session.refresh_identical();
         assert_eq!(session.identical(), [ids[0], ids[1]]);
 
         let added = place(&mut session, &[(2, &table)]);
-        session.select_instance(Some(ids[0]));
+        session.pick_instance(Some(ids[0]));
         session.refresh_identical();
         assert_eq!(session.identical().len(), 3, "a new placement joins");
 
@@ -376,7 +376,7 @@ mod tests {
         let mut session = flat_session(3, 1);
         let table = Prefab::new(TreePath::parse("/obj/structure/table"));
         let ids = place(&mut session, &[(1, &table), (3, &table)]);
-        session.select_instance(Some(ids[0]));
+        session.pick_instance(Some(ids[0]));
         session.refresh_identical();
 
         let tile = session.options.tile_size as f32;
@@ -388,7 +388,7 @@ mod tests {
         let mut session = flat_session(2, 1);
         let table = Prefab::new(TreePath::parse("/obj/structure/table"));
         let ids = place(&mut session, &[(1, &table), (2, &table)]);
-        session.select_instance(Some(ids[0]));
+        session.pick_instance(Some(ids[0]));
 
         session.edit_instance_vars_in(EditScope::Selected, "set name", &set_name("Oak"), None);
 
@@ -401,7 +401,7 @@ mod tests {
         let table = Prefab::new(TreePath::parse("/obj/structure/table"));
         let ids = place(&mut session, &[(1, &table), (2, &table), (4, &table)]);
         session.toggle_focus_at(Some(Coord::new(1, 1, 1)));
-        session.select_instance(Some(ids[0]));
+        session.pick_instance(Some(ids[0]));
 
         assert_eq!(
             session.edit_instance_vars_in(EditScope::Identical, "set name", &set_name("Oak"), None),
@@ -413,26 +413,26 @@ mod tests {
     }
 
     #[test]
-    fn the_gizmo_only_shows_for_the_select_tool() {
+    fn the_gizmo_only_shows_for_the_pick_tool() {
         let root = examples();
         let mut session = Session::new();
         session.load_environment(&root.join("test.dme")).unwrap();
         session.open_map(&root.join("test.dmm"), 1).unwrap();
-        let selected = session
+        let picked = session
             .state
             .active_document()
             .and_then(|document| document.instance_ids_at(Coord::new(6, 3, 1)).first())
             .copied()
             .unwrap();
-        session.select_instance(Some(selected));
-        assert_eq!(session.gizmo_transform(), session.selected_transform());
+        session.pick_instance(Some(picked));
+        assert_eq!(session.gizmo_transform(), session.picked_transform());
 
         for tool in [Tool::Place, Tool::Delete, Tool::Fill] {
             session.set_tool(tool);
             assert_eq!(session.gizmo_transform(), None, "{tool:?}");
         }
 
-        session.set_tool(Tool::Select);
+        session.set_tool(Tool::Pick);
         assert!(session.gizmo_transform().is_some());
     }
 
@@ -443,17 +443,17 @@ mod tests {
         session.load_environment(&root.join("test.dme")).unwrap();
         session.open_map(&root.join("test.dmm"), 1).unwrap();
         let coord = Coord::new(6, 3, 1);
-        let selected = session
+        let picked = session
             .state
             .active_document()
             .and_then(|document| document.instance_ids_at(coord).first())
             .copied()
             .unwrap();
-        session.select_instance(Some(selected));
-        let before = session.selected_transform().unwrap();
+        session.pick_instance(Some(picked));
+        let before = session.picked_transform().unwrap();
         let destination = Coord::new(coord.x + 1, coord.y, coord.z);
 
-        let moved = session.move_selected_instance(
+        let moved = session.move_picked_instance(
             destination,
             "re-anchor object",
             &[editor::document::VarMutation::Set(
@@ -464,8 +464,8 @@ mod tests {
         );
 
         assert_eq!(moved, Some(true));
-        assert_eq!(session.selected_location().unwrap().coord, destination);
-        let after = session.selected_transform().unwrap();
+        assert_eq!(session.picked_location().unwrap().coord, destination);
+        let after = session.picked_transform().unwrap();
         assert_eq!(after.pixel, [before.pixel[0] - 32, before.pixel[1]]);
         assert_eq!([after.sprite.x, after.sprite.y], [before.sprite.x, before.sprite.y]);
     }
@@ -477,28 +477,28 @@ mod tests {
         session.load_environment(&root.join("test.dme")).unwrap();
         session.open_map(&root.join("test.dmm"), 1).unwrap();
         let coord = Coord::new(6, 3, 1);
-        let selected = session
+        let picked = session
             .state
             .active_document()
             .and_then(|document| document.instance_ids_at(coord).first())
             .copied()
             .unwrap();
-        assert_eq!(session.selected_prefab(), None);
-        session.select_instance(Some(selected));
-        let transform = session.selected_transform().unwrap();
-        assert_eq!(transform.selected, selected);
+        assert_eq!(session.picked_prefab(), None);
+        session.pick_instance(Some(picked));
+        let transform = session.picked_transform().unwrap();
+        assert_eq!(transform.picked, picked);
         assert!(transform.is_movable);
         assert_eq!(transform.pixel, [0, 0]);
         assert_eq!(transform.step, [0, 0]);
         assert_eq!(transform.dir, 2);
         assert_eq!(transform.dmi_directions, Some(1));
         assert_eq!(transform.directional_types, None);
-        assert_eq!(transform.sprite.owner, selected);
+        assert_eq!(transform.sprite.owner, picked);
         let revision = session.revision();
         let before = session.instances().unwrap().sprites.clone();
 
         assert_eq!(
-            session.set_selected_instance_var("pixel_x".into(), Value::Num(7.0)),
+            session.set_picked_instance_var("pixel_x".into(), Value::Num(7.0)),
             Some(true),
         );
         assert_eq!(session.revision(), revision.wrapping_add(1));
@@ -510,9 +510,9 @@ mod tests {
         assert!(
             session.instances().unwrap().sprites[sprites.start..sprites.end]
                 .iter()
-                .any(|sprite| sprite.owner == selected)
+                .any(|sprite| sprite.owner == picked)
         );
-        assert_eq!(session.selected_transform().unwrap().pixel, [7, 0]);
+        assert_eq!(session.picked_transform().unwrap().pixel, [7, 0]);
         assert_eq!(
             session
                 .instances()
@@ -527,12 +527,12 @@ mod tests {
 
         let rendered_revision = session.revision();
         assert_eq!(
-            session.set_selected_instance_var("name".into(), Value::Text("edited".into())),
+            session.set_picked_instance_var("name".into(), Value::Text("edited".into())),
             Some(true),
         );
         assert_eq!(session.revision(), rendered_revision);
         assert_eq!(
-            session.selected_prefab().and_then(|prefab| prefab.var(&"name".into())),
+            session.picked_prefab().and_then(|prefab| prefab.var(&"name".into())),
             Some(&Value::Text("edited".into())),
         );
     }
@@ -554,25 +554,25 @@ mod tests {
             .id_of(&TreePath::parse("/obj/machinery/light"))
             .unwrap();
         let coord = Coord::new(6, 3, 1);
-        let selected = session.state.active_document().unwrap().instance_ids_at(coord)[0];
-        session.select_instance(Some(selected));
+        let picked = session.state.active_document().unwrap().instance_ids_at(coord)[0];
+        session.pick_instance(Some(picked));
         let light_texture = session.type_thumbnail(light).unwrap().texture;
         let before_revision = session.revision();
 
         assert!(session.toggle_type_visibility(table));
         assert!(!session.is_type_visible(table));
         assert_eq!(session.revision(), before_revision.wrapping_add(1));
-        assert!(session.instances().unwrap().sprite(selected).is_none());
+        assert!(session.instances().unwrap().sprite(picked).is_none());
         assert_eq!(
-            session.set_selected_instance_var("icon_state".into(), Value::Text(String::from("light"))),
+            session.set_picked_instance_var("icon_state".into(), Value::Text(String::from("light"))),
             Some(true),
         );
-        assert!(session.instances().unwrap().sprite(selected).is_none());
+        assert!(session.instances().unwrap().sprite(picked).is_none());
 
         assert!(session.toggle_type_visibility(table));
         assert!(session.is_type_visible(table));
         assert_eq!(
-            session.instances().unwrap().sprite(selected).unwrap().texture,
+            session.instances().unwrap().sprite(picked).unwrap().texture,
             light_texture
         );
         assert_render_cache_matches_rebuild(&session);
@@ -592,10 +592,10 @@ mod tests {
     #[test]
     fn a_moved_placement_draws_in_the_order_of_its_new_tile() {
         let (mut session, north, _) = tables_north_and_south();
-        session.select_instance(Some(north));
+        session.pick_instance(Some(north));
 
         assert_eq!(
-            session.move_selected_instance(Coord::new(1, 1, 1), "move", &[], None),
+            session.move_picked_instance(Coord::new(1, 1, 1), "move", &[], None),
             Some(true)
         );
 

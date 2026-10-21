@@ -131,11 +131,11 @@ impl Session {
         Some(supported)
     }
 
-    pub(crate) fn selected_directional_types(&self) -> Option<DirectionalTypes> {
+    pub(crate) fn picked_directional_types(&self) -> Option<DirectionalTypes> {
         let environment = self.state.environment.as_ref()?;
         let document = self.state.active_document()?;
-        let selected = document.selected_instance()?;
-        let prefab = document.prefab_instance(selected)?.prefab();
+        let picked = document.picked_instance()?;
+        let prefab = document.prefab_instance(picked)?.prefab();
         let id = environment.tree.id_of(&prefab.path)?;
 
         directional_types_for(&environment.tree, id)
@@ -159,18 +159,18 @@ impl Session {
         ))
     }
 
-    pub(crate) fn set_selected_directional_type(&mut self, direction: Dir, group: Option<EditGroupId>) -> Option<bool> {
+    pub(crate) fn set_picked_directional_type(&mut self, direction: Dir, group: Option<EditGroupId>) -> Option<bool> {
         self.set_directional_type_in(EditScope::Selected, direction, group)
     }
 
     pub(crate) fn set_directional_type_in(
         &mut self, scope: EditScope, direction: Dir, group: Option<EditGroupId>,
     ) -> Option<bool> {
-        let selected = self.selected_instance()?;
+        let picked = self.picked_instance()?;
         let path = {
             let environment = self.state.environment.as_ref()?;
             let document = self.state.active_document()?;
-            let prefab = document.prefab_instance(selected)?.prefab();
+            let prefab = document.prefab_instance(picked)?.prefab();
             let id = environment.tree.id_of(&prefab.path)?;
 
             directional_type_target(&environment.tree, id, direction)?
@@ -243,7 +243,7 @@ mod tests {
             .active_document()
             .unwrap()
             .instance_ids_at(dmm::Coord::new(1, 1, 1))[0];
-        session.select_instance(Some(first));
+        session.pick_instance(Some(first));
 
         assert_eq!(
             session.set_directional_type_in(EditScope::Identical, Dir::East, None),

@@ -323,7 +323,7 @@ pub fn is_map_path(path: &str) -> bool {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Tool {
     Place,
-    Select,
+    Pick,
     Node,
     BlockSelect,
     Delete,

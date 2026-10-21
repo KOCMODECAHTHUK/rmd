@@ -10,7 +10,7 @@ use crate::{
 
 const TOOL_KEYS: [(KeybindAction, Tool); 9] = [
     (KeybindAction::PlaceTool, Tool::Place),
-    (KeybindAction::SelectTool, Tool::Select),
+    (KeybindAction::PickTool, Tool::Pick),
     (KeybindAction::NodeTool, Tool::Node),
     (KeybindAction::BlockSelectTool, Tool::BlockSelect),
     (KeybindAction::DeleteTool, Tool::Delete),

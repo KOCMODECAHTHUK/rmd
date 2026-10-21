@@ -18,7 +18,7 @@ impl Session {
         let target = self
             .state
             .document(id)
-            .and_then(|document| document.selected_instance())
+            .and_then(|document| document.picked_instance())
             .map(PrefabInstanceId::get);
         let Some(bake) = self.caches.get_mut(&id).and_then(|cache| cache.bake.as_mut()) else {
             return editor::bake::UiFrame::default();
@@ -83,7 +83,7 @@ impl Session {
         let target = self
             .state
             .document(id)
-            .and_then(|document| document.selected_instance())
+            .and_then(|document| document.picked_instance())
             .map(PrefabInstanceId::get);
         let Some(cache) = self.caches.get_mut(&id) else {
             return false;

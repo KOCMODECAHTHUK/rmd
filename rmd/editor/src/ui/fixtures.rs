@@ -238,7 +238,7 @@ impl RectangleUiHarness {
         ui.set_window_pos_by_name(&name, [0.0; 2]);
         ui.set_window_size_by_name(&name, [800.0, 600.0]);
         self.interaction = MapViewInteraction {
-            selected: self.session.selected_instance(),
+            picked: self.session.picked_instance(),
             ..Default::default()
         };
         self.state.draw_map_view(

@@ -32,7 +32,7 @@ func vs_main(
     u32 vertex_id : SV_VertexID,
     u32 instance_id : SV_InstanceID,
     uniform f32x2 viewport,
-    uniform u32x2 selected_owner,
+    uniform u32x2 picked_owner,
     uniform f32 stripe_offset
 ) -> VSOutput {
     let guide = guide_lines[instance_id];
@@ -71,10 +71,10 @@ func guide_color(f32 path_position, f32 stripe_offset) -> f32x4 {
 func fs_main(
     VSOutput input,
     uniform f32x2 viewport,
-    uniform u32x2 selected_owner,
+    uniform u32x2 picked_owner,
     uniform f32 stripe_offset
 ) -> f32x4 {
-    if (any(selected_owner != u32x2(0)) && all(owner_at(i32x2(input.position.xy)) == selected_owner)) {
+    if (any(picked_owner != u32x2(0)) && all(owner_at(i32x2(input.position.xy)) == picked_owner)) {
         discard;
     }
 

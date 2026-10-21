@@ -13,7 +13,7 @@ use editor::{
 
 use crate::{
     camera::Controller,
-    session::{DirectionState, DirectionalTypes, SelectedTransform, Session},
+    session::{DirectionState, DirectionalTypes, PickedTransform, Session},
     settings::{KeybindAction, Settings},
     transform::anchor_to_tile,
     ui::{TransformMode, dpi},
@@ -80,7 +80,7 @@ impl Handle {
 
 #[derive(Debug, Clone, Copy)]
 struct DragState {
-    selected: PrefabInstanceId,
+    picked: PrefabInstanceId,
     mode: TransformMode,
     handle: Handle,
     start_mouse: [f32; 2],
@@ -268,7 +268,7 @@ impl GizmoState {
 
         if self
             .drag
-            .is_some_and(|drag| drag.selected != target.selected || drag.mode != mode)
+            .is_some_and(|drag| drag.picked != target.picked || drag.mode != mode)
         {
             self.drag = None;
         }
@@ -277,7 +277,7 @@ impl GizmoState {
         let scale = dpi(ui);
         let initial_origin = gizmo_origin(camera, map_view.min, target.sprite);
         let direction_origin = session
-            .selected_location()
+            .picked_location()
             .map(|location| tile_center_origin(camera, map_view.min, location.coord, session.options.tile_size));
         let was_dragging = self.drag.is_some();
         let was_direction_active = self.update_direction(
@@ -285,13 +285,13 @@ impl GizmoState {
             session,
             settings,
             DirectionUpdate {
-                target: selected_direction_target(target),
+                target: picked_direction_target(target),
                 origin: direction_origin,
                 placement_coord: None,
                 map_view,
             },
         );
-        if let Some(updated) = session.selected_transform() {
+        if let Some(updated) = session.picked_transform() {
             target = updated;
         }
 
@@ -303,11 +303,11 @@ impl GizmoState {
             && self.drag.is_none()
             && let Some(handle) = hovered_handle
             && ui.is_mouse_clicked(MouseButton::Left)
-            && let Some(location) = session.selected_location()
+            && let Some(location) = session.picked_location()
             && let Some(values) = values
         {
             self.drag = Some(DragState {
-                selected: target.selected,
+                picked: target.picked,
                 mode,
                 handle,
                 start_mouse: mouse,
@@ -326,7 +326,7 @@ impl GizmoState {
                 self.drag = None;
             } else if mouse != drag.start_mouse
                 && mouse.iter().all(|value| value.is_finite())
-                && let Some(location) = session.selected_location()
+                && let Some(location) = session.picked_location()
             {
                 let size = session
                     .map()
@@ -339,11 +339,11 @@ impl GizmoState {
                 let label = format!("move {} offsets", mode.label().to_ascii_lowercase());
 
                 if coord != location.coord {
-                    session.move_selected_instance(coord, label, &mutations, Some(drag.group));
+                    session.move_picked_instance(coord, label, &mutations, Some(drag.group));
                 } else if !mutations.is_empty() {
-                    session.edit_selected_instance_vars(label, &mutations, Some(drag.group));
+                    session.edit_picked_instance_vars(label, &mutations, Some(drag.group));
                 }
-                if let Some(updated) = session.selected_transform() {
+                if let Some(updated) = session.picked_transform() {
                     target = updated;
                 }
             }
@@ -374,7 +374,7 @@ impl GizmoState {
                 wheel_origin,
                 map_view,
                 set,
-                current_direction(selected_direction_target(target).state, set),
+                current_direction(picked_direction_target(target).state, set),
                 hovered_direction,
             );
         } else if values.is_some() {
@@ -661,7 +661,7 @@ impl GizmoState {
     }
 }
 
-fn transform_values(target: SelectedTransform, mode: TransformMode) -> Option<[i32; 2]> {
+fn transform_values(target: PickedTransform, mode: TransformMode) -> Option<[i32; 2]> {
     match mode {
         TransformMode::Pixel => Some(target.pixel),
         TransformMode::Step if target.is_movable => Some(target.step),
@@ -902,9 +902,9 @@ fn direction_set(
     (set.len() > 1).then_some(set)
 }
 
-fn selected_direction_target(target: SelectedTransform) -> DirectionTarget {
+fn picked_direction_target(target: PickedTransform) -> DirectionTarget {
     DirectionTarget {
-        id: DirectionGestureTarget::Selection(target.selected),
+        id: DirectionGestureTarget::Selection(target.picked),
         state: DirectionState {
             dir: target.dir,
             dmi_directions: target.dmi_directions,
@@ -968,10 +968,10 @@ fn pending_direction_outcome(pressed_at: f64, now: f64, key_down: bool, key_rele
 fn apply_direction(session: &mut Session, target: DirectionTarget, direction: Dir, group: Option<EditGroupId>) {
     match target.id {
         DirectionGestureTarget::Selection(_) if target.state.directional_types.is_some() => {
-            session.set_selected_directional_type(direction, group);
+            session.set_picked_directional_type(direction, group);
         },
         DirectionGestureTarget::Selection(_) => {
-            session.edit_selected_instance_vars("set dir", &[direction_mutation(direction)], group);
+            session.edit_picked_instance_vars("set dir", &[direction_mutation(direction)], group);
         },
         DirectionGestureTarget::Placement => {
             session.set_placement_direction(direction);
@@ -1314,7 +1314,7 @@ mod tests {
 
     fn drag(handle: Handle) -> DragState {
         DragState {
-            selected: selected(),
+            picked: picked(),
             mode: TransformMode::Pixel,
             handle,
             start_mouse: [100.0, 100.0],
@@ -1350,7 +1350,7 @@ mod tests {
         [viewport_min[0] + center[0], viewport_min[1] + center[1]]
     }
 
-    fn selected() -> PrefabInstanceId {
+    fn picked() -> PrefabInstanceId {
         let mut map = dmm::Map::new(dmm::Size { x: 1, y: 1, z: 1 });
         let key = map.intern_tile(vec![dmm::Prefab::new(core::path::TreePath::parse("/obj/test"))]);
         map.grid[0][0][0] = key;

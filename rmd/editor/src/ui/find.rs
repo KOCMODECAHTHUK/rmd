@@ -409,12 +409,12 @@ mod tests {
     #[test]
     fn context_search_uses_the_clicked_instance_instead_of_inspector_selection() {
         let document = MapDocument::new(map(), 1);
-        let selected = document.instance_ids_at(Coord::new(1, 1, 1))[0];
+        let picked = document.instance_ids_at(Coord::new(1, 1, 1))[0];
         let clicked = document.instance_ids_at(Coord::new(1, 1, 1))[1];
         let other_match = document.instance_ids_at(Coord::new(2, 1, 2))[1];
         let mut session = Session::new();
         let document_id = session.state.open_document(document);
-        session.select_instance(Some(selected));
+        session.pick_instance(Some(picked));
         let mut find = FindPanel::new().expect("valid window key");
 
         find.open_for(&session, document_id, clicked, SimilarMatchKind::Prefab);
@@ -423,7 +423,7 @@ mod tests {
         assert!(find.has_focus_request());
         assert_eq!(search.document, document_id);
         assert_eq!(search.instances, [clicked, other_match]);
-        assert_eq!(session.selected_instance(), Some(selected));
+        assert_eq!(session.picked_instance(), Some(picked));
     }
 
     #[test]
@@ -488,7 +488,7 @@ mod tests {
 
         assert_eq!(session.state.active(), Some(document_id));
         assert_eq!(session.z(), 2);
-        assert_eq!(session.selected_instance(), Some(instance));
+        assert_eq!(session.picked_instance(), Some(instance));
         let view = state.map_views.get(&document_id).unwrap();
         assert_eq!((view.camera.camera.x, view.camera.camera.y), (16.0, 16.0));
         assert_eq!(view.camera.camera.zoom, 2.5);

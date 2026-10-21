@@ -280,16 +280,16 @@ mod tests {
         assert_eq!(session.place_at(coord, None), None);
         assert!(session.choose_type(table));
         assert_eq!(session.tool(), Tool::Place);
-        let selected = session.place_at(coord, None).unwrap();
+        let picked = session.place_at(coord, None).unwrap();
 
-        assert_eq!(session.selected_instance(), Some(selected));
+        assert_eq!(session.picked_instance(), Some(picked));
         assert_eq!(session.map().unwrap().tile_at(coord).unwrap().len(), before_len + 1);
         assert_eq!(
-            session.selected_prefab().unwrap().path,
+            session.picked_prefab().unwrap().path,
             TreePath::parse("/obj/structure/table")
         );
-        assert_eq!(session.recent_prefabs()[0], *session.selected_prefab().unwrap());
-        assert!(session.instances().unwrap().sprite(selected).is_some());
+        assert_eq!(session.recent_prefabs()[0], *session.picked_prefab().unwrap());
+        assert!(session.instances().unwrap().sprite(picked).is_some());
         assert_eq!(session.revision(), revision.wrapping_add(1));
         assert_eq!(session.frame_update().unwrap().previous_revision, revision);
     }

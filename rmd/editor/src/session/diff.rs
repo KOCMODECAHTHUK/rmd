@@ -206,7 +206,7 @@ impl Session {
         self.commit(
             ToolEdit {
                 edit,
-                selected: None,
+                picked: None,
                 affected,
             },
             None,

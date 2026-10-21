@@ -440,7 +440,7 @@ fn a_ui_button_can_place_a_module_on_the_selected_atom() -> TestResult {
         .state
         .document_mut(id)
         .ok_or("document is missing")?
-        .select_instance(Some(root));
+        .pick_instance(Some(root));
     let frame = session.dm_ui(
         0,
         editor::bake::UiFeedback {
@@ -469,7 +469,7 @@ fn a_ui_placed_module_survives_editing_its_root_and_leaves_with_it() -> TestResu
         .state
         .document_mut(id)
         .ok_or("document is missing")?
-        .select_instance(Some(root));
+        .pick_instance(Some(root));
     session.dm_ui(
         0,
         editor::bake::UiFeedback {
@@ -481,7 +481,7 @@ fn a_ui_placed_module_survives_editing_its_root_and_leaves_with_it() -> TestResu
     assert_eq!(session.module_roots().len(), 1);
 
     assert_eq!(
-        session.set_selected_instance_var("key".into(), Value::Text("edited".into())),
+        session.set_picked_instance_var("key".into(), Value::Text("edited".into())),
         Some(true)
     );
 
@@ -659,7 +659,7 @@ fn clipboard_paths(session: &Session) -> Vec<Vec<String>> {
 fn a_preview_atom_can_be_selected_but_not_edited() -> TestResult {
     let fixture = Fixture::new(&[(2, "outer")])?;
     let mut session = fixture.session()?;
-    session.set_tool(Tool::Select);
+    session.set_tool(Tool::Pick);
     let preview = *preview_ids(&session).first().ok_or("no preview atoms")?;
     let id = session.state.active().ok_or("no active document")?;
     let expected = session
@@ -670,16 +670,16 @@ fn a_preview_atom_can_be_selected_but_not_edited() -> TestResult {
     let effective_before = (1..=6).map(|x| effective_paths(&session, x)).collect::<Vec<_>>();
     let source_before = (1..=6).map(|x| source_paths(&session, x)).collect::<Vec<_>>();
 
-    session.select_instance(Some(preview));
+    session.pick_instance(Some(preview));
 
-    assert_eq!(session.selected_instance(), Some(preview));
-    assert_eq!(session.selected_prefab(), Some(&expected));
+    assert_eq!(session.picked_instance(), Some(preview));
+    assert_eq!(session.picked_prefab(), Some(&expected));
     assert_eq!(session.palette(), Some(&expected));
-    assert!(session.selected_location().is_some());
+    assert!(session.picked_location().is_some());
     assert!(!session.can_edit_instance(preview));
     assert!(session.gizmo_transform().is_none());
 
-    let changed = session.set_selected_instance_var("name".into(), Value::Text("renamed".into()));
+    let changed = session.set_picked_instance_var("name".into(), Value::Text("renamed".into()));
     assert_ne!(changed, Some(true));
     assert_eq!(
         (1..=6).map(|x| effective_paths(&session, x)).collect::<Vec<_>>(),
@@ -699,12 +699,12 @@ fn disabling_previews_clears_a_preview_selection() -> TestResult {
     let fixture = Fixture::new(&[(2, "outer")])?;
     let mut session = fixture.session()?;
     let preview = *preview_ids(&session).first().ok_or("no preview atoms")?;
-    session.select_instance(Some(preview));
-    assert_eq!(session.selected_instance(), Some(preview));
+    session.pick_instance(Some(preview));
+    assert_eq!(session.picked_instance(), Some(preview));
 
     session.set_modules_enabled(false);
 
-    assert_eq!(session.selected_instance(), None);
+    assert_eq!(session.picked_instance(), None);
 
     Ok(())
 }
@@ -790,9 +790,9 @@ fn moving_a_selected_root_moves_its_module() -> TestResult {
     let fixture = Fixture::new(&[(2, "outer")])?;
     let mut session = fixture.session()?;
     let root = root_at(&session, 2);
-    session.select_instance(Some(root));
+    session.pick_instance(Some(root));
 
-    assert_eq!(session.move_selected_instance(coord(3), "move", &[], None), Some(true));
+    assert_eq!(session.move_picked_instance(coord(3), "move", &[], None), Some(true));
     assert!(session.can_edit_instance(root));
     assert_eq!(session.module_roots()[0].coord, coord(3));
     assert!(has(&session, 3, ROOT));
@@ -802,7 +802,7 @@ fn moving_a_selected_root_moves_its_module() -> TestResult {
     assert!(preview_ids(&session).iter().all(|id| is_baked(&session, *id)));
     assert_settled(&session);
 
-    assert_eq!(session.move_selected_instance(coord(6), "move", &[], None), Some(true));
+    assert_eq!(session.move_picked_instance(coord(6), "move", &[], None), Some(true));
     assert!(has(&session, 6, ROOT));
     assert!(!has(&session, 3, WALL));
     assert_settled(&session);
@@ -820,12 +820,12 @@ fn a_deferred_move_shows_the_module_without_baking_it_until_flushed() -> TestRes
         .iter()
         .map(|id| baked_position(&session, *id))
         .collect::<Vec<_>>();
-    session.select_instance(Some(root));
+    session.pick_instance(Some(root));
 
     session.set_module_bake_deferred(true);
     assert!(is_deferred(&session));
 
-    assert_eq!(session.move_selected_instance(coord(3), "move", &[], None), Some(true));
+    assert_eq!(session.move_picked_instance(coord(3), "move", &[], None), Some(true));
     assert!(has(&session, 3, ROOT));
     assert!(has(&session, 3, WALL));
     assert!(has(&session, 4, WALL));
@@ -907,9 +907,9 @@ fn a_rebake_while_deferred_drops_the_pending_ids() -> TestResult {
     let fixture = Fixture::new(&[(2, "outer")])?;
     let mut session = fixture.session()?;
     let root = root_at(&session, 2);
-    session.select_instance(Some(root));
+    session.pick_instance(Some(root));
     session.set_module_bake_deferred(true);
-    assert_eq!(session.move_selected_instance(coord(3), "move", &[], None), Some(true));
+    assert_eq!(session.move_picked_instance(coord(3), "move", &[], None), Some(true));
 
     let id = session.state.active().ok_or("no active document")?;
     session.rebake(id);
@@ -950,9 +950,9 @@ fn editing_a_root_var_switches_its_module() -> TestResult {
     session.set_modules_enabled(false);
     let root = root_at(&session, 2);
 
-    session.select_instance(Some(root));
+    session.pick_instance(Some(root));
     assert_eq!(
-        session.set_selected_instance_var("key".into(), Value::Text("alt".into())),
+        session.set_picked_instance_var("key".into(), Value::Text("alt".into())),
         Some(true)
     );
 
@@ -1334,21 +1334,21 @@ fn tramstation_root_move_timing() -> TestResult {
         .filter_map(|root| Some((root.key.origin.atom()?, root.coord)))
         .collect::<Vec<_>>();
     for (instance, coord) in roots {
-        session.select_instance(Some(instance));
+        session.pick_instance(Some(instance));
         let next = Coord::new(coord.x + 1, coord.y, coord.z);
         let started = Instant::now();
-        session.move_selected_instance(next, "move", &[], None);
+        session.move_picked_instance(next, "move", &[], None);
         let moved = started.elapsed();
         let started = Instant::now();
-        session.move_selected_instance(coord, "move", &[], None);
+        session.move_picked_instance(coord, "move", &[], None);
         let returned = started.elapsed();
 
         session.set_module_bake_deferred(true);
         let started = Instant::now();
-        session.move_selected_instance(next, "move", &[], None);
+        session.move_picked_instance(next, "move", &[], None);
         let deferred_moved = started.elapsed();
         let started = Instant::now();
-        session.move_selected_instance(coord, "move", &[], None);
+        session.move_picked_instance(coord, "move", &[], None);
         let deferred_returned = started.elapsed();
         let started = Instant::now();
         session.set_module_bake_deferred(false);

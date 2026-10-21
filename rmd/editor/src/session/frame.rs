@@ -133,7 +133,7 @@ impl Session {
 
         let mut interaction = interaction;
         if interaction.mode.is_node() {
-            interaction.selected = interaction.selected.filter(|owner| {
+            interaction.picked = interaction.picked.filter(|owner| {
                 cache
                     .instances
                     .sprite(*owner)

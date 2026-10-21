@@ -146,7 +146,7 @@ fn finish(edit: Edit, mut affected: Vec<PrefabInstanceId>) -> Option<ToolEdit> {
 
     Some(ToolEdit {
         edit,
-        selected: None,
+        picked: None,
         affected,
     })
 }

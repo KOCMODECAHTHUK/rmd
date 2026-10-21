@@ -184,7 +184,7 @@ pub fn paste_block(
     Some((
         ToolEdit {
             edit,
-            selected: None,
+            picked: None,
             affected,
         },
         target,
@@ -274,7 +274,7 @@ pub fn clear_block(
 
     Some(ToolEdit {
         edit,
-        selected: None,
+        picked: None,
         affected,
     })
 }

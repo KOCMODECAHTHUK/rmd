@@ -191,13 +191,13 @@ mod tests {
         // the gizmo drags the selection, and dragging it out of the region is the same escape
         let neighbor = Coord::new(2, 1, 1);
         let movable = session.state.active_document().unwrap().instance_ids_at(neighbor)[0];
-        session.select_instance(Some(movable));
+        session.pick_instance(Some(movable));
         assert_eq!(
-            session.move_selected_instance(outside, "move out", &[], None),
+            session.move_picked_instance(outside, "move out", &[], None),
             Some(false)
         );
-        assert_eq!(session.selected_location().unwrap().coord, neighbor);
-        assert_eq!(session.move_selected_instance(inside, "move in", &[], None), Some(true));
+        assert_eq!(session.picked_location().unwrap().coord, neighbor);
+        assert_eq!(session.move_picked_instance(inside, "move in", &[], None), Some(true));
     }
 
     #[test]

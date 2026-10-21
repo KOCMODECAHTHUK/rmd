@@ -63,11 +63,11 @@ fn source_root(app: &RectangleUiHarness) -> Result<dmm::PrefabInstanceId, Box<dy
 fn clicking_a_source_roots_marker_selects_it() -> TestResult {
     let _guard = IMGUI_CONTEXT.lock().map_err(|error| error.to_string())?;
     let (_fixture, mut app) = harness()?;
-    assert_eq!(app.session.selected_instance(), None);
+    assert_eq!(app.session.picked_instance(), None);
 
     app.click(app.tile(2, 1));
 
-    assert_eq!(app.session.selected_instance(), Some(source_root(&app)?));
+    assert_eq!(app.session.picked_instance(), Some(source_root(&app)?));
     assert!(app.view.gestures.module_popup.is_some());
 
     Ok(())
@@ -93,7 +93,7 @@ fn clicking_a_coordinate_roots_marker_opens_the_popup_and_keeps_the_selection() 
         .ok_or("module popup is missing")?;
     assert_eq!(key, app.session.module_roots()[0].key);
     assert_eq!(coord, Coord::new(4, 1, 1));
-    assert_eq!(app.session.selected_instance(), None);
+    assert_eq!(app.session.picked_instance(), None);
     assert!(app.module_buttons.is_some());
 
     Ok(())
@@ -106,7 +106,7 @@ fn clicking_a_nested_roots_marker_keeps_the_selection() -> TestResult {
 
     app.click(app.tile(3, 1));
 
-    assert_eq!(app.session.selected_instance(), None);
+    assert_eq!(app.session.picked_instance(), None);
     assert_eq!(
         app.view
             .gestures
@@ -129,10 +129,7 @@ fn the_popup_follows_a_moved_root() -> TestResult {
     app.click(app.tile(2, 1));
     let target = Coord::new(5, 1, 1);
 
-    assert_eq!(
-        app.session.move_selected_instance(target, "move", &[], None),
-        Some(true)
-    );
+    assert_eq!(app.session.move_picked_instance(target, "move", &[], None), Some(true));
     app.step();
 
     let (key, coord) = app.view.gestures.module_popup.clone().ok_or("module popup closed")?;
@@ -151,14 +148,14 @@ fn dragging_the_gizmo_of_a_selected_root_moves_it() -> TestResult {
     app.key(Key::Escape, true);
     app.key(Key::Escape, false);
     let root = source_root(&app)?;
-    assert_eq!(app.session.selected_instance(), Some(root));
+    assert_eq!(app.session.picked_instance(), Some(root));
 
     app.key(Key::ModCtrl, true);
     app.drag(app.tile(2, 1), app.tile(5, 1));
     app.key(Key::ModCtrl, false);
 
     assert_eq!(
-        app.session.selected_location().map(|location| location.coord),
+        app.session.picked_location().map(|location| location.coord),
         Some(Coord::new(5, 1, 1))
     );
     assert_eq!(app.session.module_roots()[0].coord, Coord::new(5, 1, 1));
@@ -358,7 +355,7 @@ fn the_delete_key_removes_a_selected_source_root() -> TestResult {
     let (_fixture, mut app) = harness()?;
     app.click(app.tile(2, 1));
     let root = source_root(&app)?;
-    assert_eq!(app.session.selected_instance(), Some(root));
+    assert_eq!(app.session.picked_instance(), Some(root));
 
     app.key(Key::Delete, true);
     app.key(Key::Delete, false);
@@ -366,7 +363,7 @@ fn the_delete_key_removes_a_selected_source_root() -> TestResult {
     let document = app.session.state.active_document().ok_or("no document")?;
     assert!(document.instance_location(root).is_none());
     assert!(app.session.module_roots().is_empty());
-    assert_eq!(app.session.selected_instance(), None);
+    assert_eq!(app.session.picked_instance(), None);
 
     Ok(())
 }

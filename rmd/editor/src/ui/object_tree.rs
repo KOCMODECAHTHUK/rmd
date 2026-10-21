@@ -194,9 +194,9 @@ impl ObjectTreePanel {
         &self.window
     }
 
-    pub(super) fn reveal_selected_instance(&mut self, session: &Session) {
+    pub(super) fn reveal_picked_instance(&mut self, session: &Session) {
         let Some(selected) = session
-            .selected_prefab()
+            .picked_prefab()
             .and_then(|prefab| session.tree()?.id_of(&prefab.path))
         else {
             return;
@@ -965,19 +965,19 @@ mod tests {
         let tile = map.intern_tile(vec![Prefab::new(path)]);
         map.grid[0][0][0] = tile;
         let document = MapDocument::new(map, 1);
-        let selected_instance = document.instance_ids_at(Coord::new(1, 1, 1))[0];
+        let picked_instance = document.instance_ids_at(Coord::new(1, 1, 1))[0];
         let mut session = Session::new();
         session.state.environment = Some(std::sync::Arc::new(editor::Environment::new(".", tree)));
         session.state.open_document(document);
-        session.set_tool(Tool::Select);
-        session.select_instance(Some(selected_instance));
+        session.set_tool(Tool::Pick);
+        session.pick_instance(Some(picked_instance));
         let mut state = ObjectTreePanel::new().expect("valid window key");
 
-        state.reveal_selected_instance(&session);
+        state.reveal_picked_instance(&session);
 
         assert_eq!(state.selected, Some(selected_type));
         assert_eq!(state.reveal, Some(selected_type));
-        assert_eq!(session.tool(), Tool::Select);
+        assert_eq!(session.tool(), Tool::Pick);
     }
 
     #[test]

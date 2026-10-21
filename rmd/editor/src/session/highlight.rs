@@ -105,8 +105,8 @@ impl Session {
             .iter()
             .map(|owner| (*owner, editor::bake::HIGHLIGHT_ALWAYS))
             .collect::<Vec<_>>();
-        if let Some(selected) = document.selected_instance() {
-            sources.push((selected, editor::bake::HIGHLIGHT_SELECTED));
+        if let Some(picked) = document.picked_instance() {
+            sources.push((picked, editor::bake::HIGHLIGHT_SELECTED));
         }
 
         if let Some(hovered) = hovered {

@@ -587,14 +587,14 @@ fn only_the_active_view_outlines_its_selected_instance() {
         });
         let id = session.state.active().unwrap();
         let table = session.state.document(id).unwrap().instance_ids_at(Coord::new(1, 1, 1))[0];
-        session.select_instance(Some(table));
+        session.pick_instance(Some(table));
 
         (id, table)
     };
     let (left, _) = select_table_in("rmd-selection-left.dmm");
     let (right, table) = select_table_in("rmd-selection-right.dmm");
-    assert!(session.selected_instance_of(left).is_some());
-    session.set_tool(Tool::Select);
+    assert!(session.picked_instance_of(left).is_some());
+    session.set_tool(Tool::Pick);
 
     let mut context = rectangle_context();
     let mut state = UiState::new(false).unwrap();
@@ -619,7 +619,7 @@ fn only_the_active_view_outlines_its_selected_instance() {
 
     let outlined = views
         .iter()
-        .map(|view| (view.document, view.interaction.selected))
+        .map(|view| (view.document, view.interaction.picked))
         .collect::<Vec<_>>();
     assert_eq!(outlined, [(left, None), (right, Some(table))]);
 }

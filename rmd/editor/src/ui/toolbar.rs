@@ -104,7 +104,7 @@ pub(super) fn draw_top_overlay(ui: &Ui, session: &mut Session, bounds: OverlayRe
 
     draw_tool_button(ui, session, keybindings, Tool::Place);
     ui.same_line();
-    draw_tool_button(ui, session, keybindings, Tool::Select);
+    draw_tool_button(ui, session, keybindings, Tool::Pick);
     if session.node_tool_available() {
         ui.same_line();
         draw_tool_button(ui, session, keybindings, Tool::Node);
@@ -337,7 +337,7 @@ fn draw_tool_button(ui: &Ui, session: &mut Session, keybindings: KeyBindings, to
             KeybindAction::PlaceTool,
             format!("Click to place the brush\n{alternate}: object brush replaces tile objects"),
         ),
-        Tool::Select => (KeybindAction::SelectTool, String::from("Click an atom to select it")),
+        Tool::Pick => (KeybindAction::PickTool, String::from("Click an atom to pick it")),
         Tool::Node => (
             KeybindAction::NodeTool,
             String::from(

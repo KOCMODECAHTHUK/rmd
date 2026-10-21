@@ -174,13 +174,13 @@ impl UiState {
                         "Delete",
                         KeybindAction::Delete,
                         EditCommand::Delete,
-                        selected || session.selected_instance().is_some(),
+                        selected || session.picked_instance().is_some(),
                     ),
                     (
                         "Deselect",
                         KeybindAction::Deselect,
                         EditCommand::Deselect,
-                        selected || session.selected_instance().is_some(),
+                        selected || session.picked_instance().is_some(),
                     ),
                 ] {
                     if ui.menu_item_enabled_selected_with_shortcut(

@@ -658,7 +658,7 @@ mod tests {
         let mut state = UiState::new(false).unwrap();
         state.jump_to_instance(&mut session, target);
         assert_eq!(session.z(), 2);
-        assert_eq!(session.selected_instance(), Some(target.instance));
+        assert_eq!(session.picked_instance(), Some(target.instance));
         panel.apply(
             &mut session,
             Action::Delete {

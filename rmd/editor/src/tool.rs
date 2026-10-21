@@ -28,7 +28,7 @@ pub const MAX_FILL_TILES: usize = 5_000;
 pub enum Tool {
     Place,
     #[default]
-    Select,
+    Pick,
     Node,
     BlockSelect,
     Delete,
@@ -168,7 +168,7 @@ pub struct ToolContext<'a> {
 
 pub struct ToolEdit {
     pub edit: Edit,
-    pub selected: Option<PrefabInstanceId>,
+    pub picked: Option<PrefabInstanceId>,
     pub affected: Vec<PrefabInstanceId>,
 }
 
@@ -188,7 +188,7 @@ impl Tool {
     pub fn label(self) -> &'static str {
         match self {
             Tool::Place => "Place",
-            Tool::Select => "Select",
+            Tool::Pick => "Pick",
             Tool::Node => "Node",
             Tool::BlockSelect => "Block Select",
             Tool::Delete => "Delete",
@@ -202,7 +202,7 @@ impl Tool {
     pub fn icon(self) -> char {
         match self {
             Tool::Place => ICON_PENCIL,
-            Tool::Select => ICON_EYEDROPPER,
+            Tool::Pick => ICON_EYEDROPPER,
             Tool::Node => ICON_VECTOR_POLYLINE,
             Tool::BlockSelect => ICON_SELECT_DRAG,
             Tool::Delete => ICON_ERASER,
@@ -217,7 +217,7 @@ impl Tool {
         match self {
             Self::Place => place(context),
             Self::Delete => delete(context),
-            Self::Select | Self::Node | Self::BlockSelect | Self::Replace | Self::RectFill | Self::Comment => None,
+            Self::Pick | Self::Node | Self::BlockSelect | Self::Replace | Self::RectFill | Self::Comment => None,
             Self::Fill => fill(context, Some(MAX_FILL_TILES), None).ok().flatten(),
         }
     }
@@ -243,7 +243,7 @@ impl From<Tool> for net::Tool {
     fn from(tool: Tool) -> Self {
         match tool {
             Tool::Place => Self::Place,
-            Tool::Select => Self::Select,
+            Tool::Pick => Self::Pick,
             Tool::Node => Self::Node,
             Tool::BlockSelect => Self::BlockSelect,
             Tool::Delete => Self::Delete,
@@ -258,7 +258,7 @@ impl From<net::Tool> for Tool {
     fn from(tool: net::Tool) -> Self {
         match tool {
             net::Tool::Place => Self::Place,
-            net::Tool::Select => Self::Select,
+            net::Tool::Pick => Self::Pick,
             net::Tool::Node => Self::Node,
             net::Tool::BlockSelect => Self::BlockSelect,
             net::Tool::Delete => Self::Delete,
@@ -344,7 +344,7 @@ pub fn fill_selection(
 
     Some(ToolEdit {
         edit,
-        selected: None,
+        picked: None,
         affected,
     })
 }
@@ -618,7 +618,7 @@ fn build_selection_edit(
     Some((
         ToolEdit {
             edit,
-            selected: None,
+            picked: None,
             affected,
         },
         request.target,
@@ -845,7 +845,7 @@ fn place_on_tile(
             !replaced
         });
     }
-    let (after, selected, placed) = place_prefab_into(document, tree, coord, tile, prefab, kind)?;
+    let (after, picked, placed) = place_prefab_into(document, tree, coord, tile, prefab, kind)?;
     affected.extend(placed);
 
     let mut edit = Edit::new(format!("place {}", prefab.path));
@@ -853,7 +853,7 @@ fn place_on_tile(
 
     Some(ToolEdit {
         edit,
-        selected: Some(selected),
+        picked: Some(picked),
         affected,
     })
 }
@@ -879,7 +879,7 @@ fn place_prefab_into(
 ) -> Option<(PlacedTile, PrefabInstanceId, Vec<PrefabInstanceId>)> {
     let mut affected = Vec::new();
 
-    let selected = match kind {
+    let picked = match kind {
         PlacementKind::Turf | PlacementKind::Area => {
             let matching = after
                 .iter()
@@ -888,36 +888,36 @@ fn place_prefab_into(
                 .collect::<Vec<_>>();
 
             if let Some(first) = matching.first().copied() {
-                let selected = after[first].id();
+                let picked = after[first].id();
                 *after[first].prefab_mut() = prefab.clone();
-                affected.push(selected);
+                affected.push(picked);
                 for index in matching.into_iter().skip(1).rev() {
                     affected.push(after.remove(index).id());
                 }
 
-                selected
+                picked
             } else {
                 let placed = document.instantiate(prefab.clone());
-                let selected = placed.id();
+                let picked = placed.id();
                 let index = insertion_index(tree, &after, kind);
                 after.insert(index, placed);
-                affected.push(selected);
+                affected.push(picked);
 
-                selected
+                picked
             }
         },
         PlacementKind::Atom => {
             let placed = document.instantiate(prefab.clone());
-            let selected = placed.id();
+            let picked = placed.id();
             let index = insertion_index(tree, &after, kind);
             after.insert(index, placed);
-            affected.push(selected);
+            affected.push(picked);
 
-            selected
+            picked
         },
     };
 
-    (document.placed_tile(coord).as_ref() != Some(&after)).then_some((after, selected, affected))
+    (document.placed_tile(coord).as_ref() != Some(&after)).then_some((after, picked, affected))
 }
 
 fn delete(context: &mut ToolContext<'_>) -> Option<ToolEdit> {
@@ -940,7 +940,7 @@ fn delete(context: &mut ToolContext<'_>) -> Option<ToolEdit> {
 
     Some(ToolEdit {
         edit,
-        selected: None,
+        picked: None,
         affected: vec![target],
     })
 }
@@ -1022,7 +1022,7 @@ fn fill(
 
     Ok(Some(ToolEdit {
         edit,
-        selected: None,
+        picked: None,
         affected,
     }))
 }
@@ -1540,7 +1540,7 @@ mod tests {
         let mut chair = Prefab::new(TreePath::parse("/obj/chair"));
         chair.set_var("name".into(), Value::Text("custom".into()));
         let action = place(&mut document, &tree, &chair).unwrap();
-        let selected = action.selected.unwrap();
+        let picked = action.picked.unwrap();
         document.apply(action.edit);
 
         let paths = document
@@ -1553,7 +1553,7 @@ mod tests {
         assert_eq!(paths, ["/obj/table", "/obj/chair", "/turf/floor", "/area/station"]);
         assert_eq!(
             document
-                .prefab_instance(selected)
+                .prefab_instance(picked)
                 .ok_or("prefab instance is missing")?
                 .prefab()
                 .var(&"name".into()),
@@ -1569,7 +1569,7 @@ mod tests {
         let turf_id = document.instance_ids_at(dmm::Coord::new(1, 1, 1))[0];
         let before = document.placed_tile(dmm::Coord::new(1, 1, 1)).unwrap();
         let action = place(&mut document, &tree, &Prefab::new(TreePath::parse("/turf/wall"))).unwrap();
-        assert_eq!(action.selected, Some(turf_id));
+        assert_eq!(action.picked, Some(turf_id));
         assert_eq!(action.affected.len(), 2);
         document.apply(action.edit);
 
@@ -1583,7 +1583,7 @@ mod tests {
         let mut document = map_document(&["/obj/table", "/turf/floor", "/area/station"]);
         let area_id = document.instance_ids_at(dmm::Coord::new(1, 1, 1))[2];
         let action = place(&mut document, &tree, &Prefab::new(TreePath::parse("/area/space"))).unwrap();
-        assert_eq!(action.selected, Some(area_id));
+        assert_eq!(action.picked, Some(area_id));
         document.apply(action.edit);
         let tile = document.map.tile_at(dmm::Coord::new(1, 1, 1)).unwrap();
         assert_eq!(tile[2].path, TreePath::parse("/area/space"));
@@ -1637,7 +1637,7 @@ mod tests {
         let coord = dmm::Coord::new(1, 1, 1);
         let mut document = map_document(&["/obj/table", "/turf/floor", "/area/station"]);
         let target = document.instance_ids_at(coord)[0];
-        document.select_instance(Some(target));
+        document.pick_instance(Some(target));
 
         let action = Tool::Delete
             .build_edit(&mut ToolContext {
@@ -1651,7 +1651,7 @@ mod tests {
                 custom_fill_boundaries: &[],
             })
             .unwrap();
-        assert_eq!(action.selected, None);
+        assert_eq!(action.picked, None);
         assert_eq!(action.affected, [target]);
         document.apply(action.edit);
 
@@ -1663,7 +1663,7 @@ mod tests {
             .map(|prefab| prefab.path.to_string())
             .collect::<Vec<_>>();
         assert_eq!(paths, ["/turf/floor", "/area/station"]);
-        assert_eq!(document.selected_instance(), None);
+        assert_eq!(document.picked_instance(), None);
         assert_eq!(document.instance_location(target), None);
 
         assert!(
@@ -1730,7 +1730,7 @@ mod tests {
         blue.set_var("name".into(), Value::Text("custom blue".into()));
 
         let action = fill(&mut document, &tree, &blue, Coord::new(3, 3, 1), FillMode::Wall).unwrap();
-        assert_eq!(action.selected, None);
+        assert_eq!(action.picked, None);
         assert_eq!(action.edit.changes.len(), 9);
         assert_eq!(action.affected.len(), 10);
         document.apply(action.edit);
@@ -2158,7 +2158,7 @@ mod tests {
         let action = fill_selection(&mut document, &tree, target, &wall, BlockSelectionMode::Full).unwrap();
         assert_eq!(action.edit.label, "fill block with /turf/wall");
         assert_eq!(action.edit.changes.len(), 2);
-        assert_eq!(action.selected, None);
+        assert_eq!(action.picked, None);
         document.apply(action.edit);
 
         for (x, turf_id) in (1..=2).zip(turf_ids) {

@@ -97,7 +97,7 @@ impl UiState {
             document.set_focus(None);
         }
 
-        session.select_instance(Some(target.instance));
+        session.pick_instance(Some(target.instance));
     }
 
     pub(in crate::ui) fn go_to_tile(&mut self, session: &mut Session, document: DocumentId, coord: Coord, now: f64) {
