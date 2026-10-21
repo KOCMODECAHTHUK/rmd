@@ -1,7 +1,7 @@
 use dmm::Coord;
 use editor::{
     command::EditGroupId,
-    document::{DocumentId, Selection},
+    document::{DocumentId, PrefabInstanceId, Selection},
     tool::{
         RegionSelectionMode, SelectionMask, SelectionPlacement, SelectionRotation, SelectionTransform, Tool,
         fill_selection as build_selection_fill, is_placeable, place_selection_with_mode as build_selection_placement,
@@ -81,29 +81,40 @@ impl Session {
         }
 
         match pending.state {
-            PendingMoveState::Unmoved => self.commit_pending_move(pending, target_min),
-            PendingMoveState::Moved { .. } => {
-                // moving from the untouched map puts back whatever the region passed over
-                if !self.undo() {
+            PendingMoveState::Unmoved => self.commit_pending_move(pending, target_min, &[]),
+            PendingMoveState::Moved { group, .. } => {
+                let is_back = target_min == pending.source.bounds.min;
+                if !is_back
+                    && !self.can_place_region_with_mode(
+                        pending.source.bounds,
+                        target_min,
+                        SelectionRotation::Original,
+                        pending.source.mode,
+                    )
+                {
                     return false;
                 }
 
-                if target_min == pending.source.bounds.min {
-                    self.pending_move = Some(PendingMove {
-                        state: PendingMoveState::Unmoved,
-                        ..pending
-                    });
+                // moving from the untouched map puts back whatever the region passed over
+                let Some(retracted) = self
+                    .state
+                    .active_document_mut()
+                    .and_then(|document| document.retract_with_affected(group))
+                else {
+                    return false;
+                };
 
+                if !is_back && self.commit_pending_move(pending, target_min, &retracted) {
                     return true;
                 }
 
-                if self.commit_pending_move(pending, target_min) {
-                    return true;
-                }
+                self.pending_move = Some(PendingMove {
+                    state: PendingMoveState::Unmoved,
+                    ..pending
+                });
+                self.settle_retracted(&retracted);
 
-                self.redo();
-
-                false
+                is_back
             },
             PendingMoveState::Floating => {
                 let Some(rotation) = self.live_floating_paste().map(|floating| floating.rotation) else {
@@ -120,7 +131,7 @@ impl Session {
         }
     }
 
-    fn commit_pending_move(&mut self, pending: PendingMove, target_min: Coord) -> bool {
+    fn commit_pending_move(&mut self, pending: PendingMove, target_min: Coord, retracted: &[PrefabInstanceId]) -> bool {
         let mode = pending.source.mode;
         if !self.can_place_selected_region_with_mode(
             target_min,
@@ -138,6 +149,7 @@ impl Session {
             SelectionPlacement::Move,
             mode,
             Some(group),
+            retracted,
         ) {
             return false;
         }
@@ -154,6 +166,15 @@ impl Session {
         true
     }
 
+    fn settle_retracted(&mut self, retracted: &[PrefabInstanceId]) {
+        self.update_instances(retracted);
+        if let Some(id) = self.state.active()
+            && let Some(cache) = self.caches.get_mut(&id)
+        {
+            cache.map_revision = cache.map_revision.wrapping_add(1);
+        }
+    }
+
     pub fn finish_live_move(&mut self) {
         self.pending_move = None;
     }
@@ -167,8 +188,14 @@ impl Session {
 
         match pending.state {
             PendingMoveState::Unmoved => {},
-            PendingMoveState::Moved { .. } => {
-                self.undo();
+            PendingMoveState::Moved { group, .. } => {
+                if let Some(retracted) = self
+                    .state
+                    .active_document_mut()
+                    .and_then(|document| document.retract_with_affected(group))
+                {
+                    self.settle_retracted(&retracted);
+                }
             },
             PendingMoveState::Floating => {
                 if let Some(floating) = self.live_floating_paste()
@@ -257,12 +284,12 @@ impl Session {
             return self.repaste_floating(target_min, floating.rotation);
         }
 
-        self.commit_region_placement(target_min, rotation, placement, selection_mode, None)
+        self.commit_region_placement(target_min, rotation, placement, selection_mode, None, &[])
     }
 
     fn commit_region_placement(
         &mut self, target_min: Coord, rotation: SelectionRotation, placement: SelectionPlacement,
-        selection_mode: RegionSelectionMode, group: Option<EditGroupId>,
+        selection_mode: RegionSelectionMode, group: Option<EditGroupId>, retracted: &[PrefabInstanceId],
     ) -> bool {
         let hidden = self.hidden_types();
         let built = {
@@ -285,9 +312,15 @@ impl Session {
             )
         };
 
-        let Some((action, selection)) = built else {
+        let Some((mut action, selection)) = built else {
             return false;
         };
+
+        if !retracted.is_empty() {
+            action.affected.extend_from_slice(retracted);
+            action.affected.sort_unstable();
+            action.affected.dedup();
+        }
 
         self.commit_selecting(
             action,
@@ -303,6 +336,13 @@ impl Session {
         &self, target_min: Coord, rotation: SelectionRotation, _placement: SelectionPlacement,
         mode: RegionSelectionMode,
     ) -> bool {
+        self.selection()
+            .is_some_and(|selection| self.can_place_region_with_mode(selection, target_min, rotation, mode))
+    }
+
+    fn can_place_region_with_mode(
+        &self, selection: Selection, target_min: Coord, rotation: SelectionRotation, mode: RegionSelectionMode,
+    ) -> bool {
         if self.tool() != Tool::Select {
             return false;
         }
@@ -317,10 +357,6 @@ impl Session {
         }
 
         let Some(document) = self.state.active_document() else {
-            return false;
-        };
-
-        let Some(selection) = self.selection() else {
             return false;
         };
 
@@ -1013,6 +1049,7 @@ mod tests {
         );
         assert_eq!(undo_depth(&session), depth + 1);
         assert_eq!(session.undo_label(), Some("move region"));
+        assert_eq!(session.redo_label(), None);
         assert_render_cache_matches_rebuild(&session);
 
         assert!(session.undo());
@@ -1020,6 +1057,28 @@ mod tests {
         assert_eq!(location(&session), Some(Coord::new(1, 1, 1)));
         assert!(session.redo());
         assert_eq!(location(&session), Some(Coord::new(5, 1, 1)));
+    }
+
+    #[test]
+    fn a_live_region_move_cancelled_or_dragged_back_keeps_the_redo_from_before() {
+        let (mut session, _) = table_beside_a_wall(Coord::new(3, 1, 1));
+        assert!(session.move_selected_region_live(Coord::new(2, 1, 1)));
+        session.finish_live_move();
+        let moved = session.map().unwrap().clone();
+        assert!(session.undo());
+
+        assert!(session.move_selected_region_live(Coord::new(4, 1, 1)));
+        session.cancel_live_move();
+        assert_eq!(session.redo_label(), Some("move region"));
+
+        assert!(session.move_selected_region_live(Coord::new(4, 1, 1)));
+        assert!(session.move_selected_region_live(Coord::new(1, 1, 1)));
+        session.finish_live_move();
+        assert_eq!(session.redo_label(), Some("move region"));
+
+        assert!(session.redo());
+        assert_eq!(*session.map().unwrap(), moved);
+        assert_render_cache_matches_rebuild(&session);
     }
 
     #[test]
@@ -1033,6 +1092,7 @@ mod tests {
         assert!(session.move_selected_region_live(Coord::new(1, 1, 1)));
         assert_eq!(*session.map().unwrap(), before);
         assert_eq!(undo_depth(&session), depth);
+        assert_eq!(session.redo_label(), None, "a move dragged back leaves nothing to redo");
         assert!(session.move_selected_region_live(Coord::new(4, 1, 1)));
         assert!(
             !session.move_selected_region_live(Coord::new(7, 1, 1)),
@@ -1047,6 +1107,7 @@ mod tests {
         assert_eq!(*session.map().unwrap(), before);
         assert_eq!(session.selection(), source);
         assert_eq!(undo_depth(&session), depth);
+        assert_eq!(session.redo_label(), None, "a cancelled move leaves nothing to redo");
         assert_render_cache_matches_rebuild(&session);
     }
 }

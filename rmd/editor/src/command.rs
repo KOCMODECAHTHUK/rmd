@@ -1,5 +1,6 @@
 use std::{
     collections::{HashMap, HashSet, hash_map::Entry},
+    mem,
     sync::atomic::{AtomicU64, Ordering},
 };
 
@@ -181,11 +182,19 @@ struct HistoryEntry {
 }
 
 #[derive(Debug)]
+struct Displaced {
+    redo_stack: Vec<HistoryEntry>,
+    saved_at: Option<usize>,
+}
+
+#[derive(Debug)]
 pub struct History {
     undo_stack: Vec<HistoryEntry>,
     redo_stack: Vec<HistoryEntry>,
     /// Saved undo position
     saved_at: Option<usize>,
+    /// What pushing the top entry discarded, kept until anything else touches the history
+    displaced: Option<Displaced>,
 }
 
 impl Default for History {
@@ -194,6 +203,7 @@ impl Default for History {
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
             saved_at: Some(0),
+            displaced: None,
         }
     }
 }
@@ -230,6 +240,11 @@ impl History {
 
             if previous.edit.changes.is_empty() {
                 self.undo_stack.pop();
+                self.displaced = None;
+            }
+
+            if !self.redo_stack.is_empty() {
+                self.displaced = None;
             }
 
             self.discard_redo();
@@ -237,7 +252,12 @@ impl History {
             return true;
         }
 
+        let displaced = Displaced {
+            redo_stack: mem::take(&mut self.redo_stack),
+            saved_at: self.saved_at,
+        };
         self.discard_redo();
+        self.displaced = Some(displaced);
         self.undo_stack.push(HistoryEntry { edit, group });
         true
     }
@@ -249,9 +269,29 @@ impl History {
 
         let entry = self.undo_stack.pop()?;
 
+        self.displaced = None;
         self.redo_stack.push(entry);
 
         self.redo_stack.last().map(|entry| &entry.edit)
+    }
+
+    // an undo that leaves the redo stack as the edit found it
+    pub(crate) fn retract(&mut self, grid: &mut Grid) -> Option<Edit> {
+        if !apply_edit(grid, &self.undo_stack.last()?.edit, ChangeSide::Before) {
+            return None;
+        }
+
+        let entry = self.undo_stack.pop()?;
+
+        match self.displaced.take() {
+            Some(displaced) => {
+                self.redo_stack = displaced.redo_stack;
+                self.saved_at = displaced.saved_at;
+            },
+            None => self.discard_redo(),
+        }
+
+        Some(entry.edit)
     }
 
     pub(crate) fn redo(&mut self, grid: &mut Grid) -> Option<&Edit> {
@@ -261,6 +301,7 @@ impl History {
 
         let entry = self.redo_stack.pop()?;
 
+        self.displaced = None;
         self.undo_stack.push(entry);
 
         self.undo_stack.last().map(|entry| &entry.edit)
@@ -268,12 +309,14 @@ impl History {
 
     pub fn mark_saved(&mut self) {
         self.saved_at = Some(self.undo_stack.len());
+        self.displaced = None;
     }
 
     pub fn clear(&mut self) {
         self.undo_stack.clear();
         self.redo_stack.clear();
         self.saved_at = None;
+        self.displaced = None;
     }
 
     pub fn is_dirty(&self) -> bool {
@@ -432,6 +475,48 @@ mod tests {
         map.grid[0][0] = vec![occupied, occupied, empty];
 
         MapDocument::new(map, 1)
+    }
+
+    fn rename_table(document: &MapDocument, label: &str, name: &str) -> Edit {
+        let coord = Coord::new(1, 1, 1);
+        let mut after = document.placed_tile(coord).unwrap();
+        after[1]
+            .prefab_mut()
+            .set_var("name".into(), Value::Text(String::from(name)));
+        let mut edit = Edit::new(label);
+        edit.change(document, coord, after);
+
+        edit
+    }
+
+    #[test]
+    fn retracting_an_edit_brings_back_the_redo_it_discarded() {
+        let mut document = document();
+        document.apply(rename_table(&document, "rename", "first"));
+        document.history.mark_saved();
+        assert!(document.undo());
+        let group = EditGroupId::new();
+        assert!(document.apply_grouped(rename_table(&document, "live", "second"), Some(group)));
+        assert!(!document.history.can_redo());
+
+        assert!(document.retract_with_affected(group).is_some());
+        assert_eq!(document.redo_label(), Some("rename"));
+        assert!(document.redo());
+        assert!(!document.history.is_dirty(), "the save point comes back with the redo");
+    }
+
+    #[test]
+    fn retracting_an_edit_saved_in_the_meantime_discards_the_redo() {
+        let mut document = document();
+        document.apply(rename_table(&document, "rename", "first"));
+        assert!(document.undo());
+        let group = EditGroupId::new();
+        assert!(document.apply_grouped(rename_table(&document, "live", "second"), Some(group)));
+        document.history.mark_saved();
+
+        assert!(document.retract_with_affected(group).is_some());
+        assert_eq!(document.redo_label(), None);
+        assert!(document.history.is_dirty(), "the file holds the retracted edit");
     }
 
     #[test]

@@ -1,5 +1,6 @@
 use core::types::{Identifier, Value};
 use std::{
+    borrow::Cow,
     collections::{BTreeMap, BTreeSet, HashSet},
     io::Write,
     mem,
@@ -121,20 +122,22 @@ impl Journal {
 enum StepKind {
     Undo,
     Redo,
+    Retract,
 }
 
 impl StepKind {
     fn next_step<'a>(&self, history: &'a History) -> Option<&'a Edit> {
         match self {
-            StepKind::Undo => history.next_undo(),
+            StepKind::Undo | StepKind::Retract => history.next_undo(),
             StepKind::Redo => history.next_redo(),
         }
     }
 
-    fn step<'a>(&self, history: &'a mut History, grid: &mut Grid) -> Option<&'a Edit> {
+    fn step<'a>(&self, history: &'a mut History, grid: &mut Grid) -> Option<Cow<'a, Edit>> {
         match self {
-            StepKind::Undo => history.undo(grid),
-            StepKind::Redo => history.redo(grid),
+            StepKind::Undo => history.undo(grid).map(Cow::Borrowed),
+            StepKind::Redo => history.redo(grid).map(Cow::Borrowed),
+            StepKind::Retract => history.retract(grid).map(Cow::Owned),
         }
     }
 }
@@ -748,22 +751,26 @@ impl MapDocument {
             .map(|edit| self.current_ids(edit))
             .unwrap_or_default();
 
-        let edit = step_kind.step(&mut self.history, &mut self.map);
-        if let (Some(edit), Some(journal)) = (edit, self.journal.as_mut()) {
-            journal.record(edit);
-        }
+        let (level, selection, affected) = {
+            let edit = step_kind.step(&mut self.history, &mut self.map)?;
+            if let Some(journal) = self.journal.as_mut() {
+                journal.record(&edit);
+            }
 
-        let edit = edit?;
-        let level = edit.level().map(LevelEdit::z);
-        let selection = edit.selection();
-        let affected = Some(with_replaced(edit, replaced));
+            (
+                edit.level().map(LevelEdit::z),
+                edit.selection(),
+                Some(with_replaced(&edit, replaced)),
+            )
+        };
+
         if let Some(z) = level {
             self.level_changed(z);
         }
 
         if let Some(SelectionChange { before, after }) = selection {
             match step_kind {
-                StepKind::Undo => self.restore_selection(before),
+                StepKind::Undo | StepKind::Retract => self.restore_selection(before),
                 StepKind::Redo => self.restore_selection(after),
             };
         }
@@ -780,6 +787,14 @@ impl MapDocument {
 
     pub fn undo_with_affected(&mut self) -> Option<Vec<PrefabInstanceId>> {
         self.step_history(StepKind::Undo)
+    }
+
+    pub fn retract_with_affected(&mut self, group: EditGroupId) -> Option<Vec<PrefabInstanceId>> {
+        if self.history.undo_group() != Some(group) {
+            return None;
+        }
+
+        self.step_history(StepKind::Retract)
     }
 
     pub fn redo(&mut self) -> bool {
