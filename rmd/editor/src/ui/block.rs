@@ -195,11 +195,7 @@ pub(super) fn draw_block_outline(
             BlockSelectionMode::Full => String::from("Full"),
             BlockSelectionMode::Hollow { line_width } => format!("Border {line_width}"),
         };
-        let label = format!(
-            "{mode_label}: {} x {}",
-            displayed.width(),
-            displayed.height()
-        );
+        let label = format!("{mode_label}: {} x {}", displayed.width(), displayed.height());
         let text_size = ui.calc_text_size(&label);
         let label_min = [
             bounds.min[0].max(viewport.min[0] + 4.0),

@@ -103,53 +103,69 @@ pub(super) fn draw_node_hit(ui: &Ui, session: &Session, frame: &ViewFrame<'_>) -
         .unwrap_or_default()
 }
 
+fn node_context_menu(
+    session: &mut Session, frame: &ViewFrame<'_>, node_hit: &NodeOverlayHit, coord: Coord,
+) -> Option<NodeContext> {
+    if session.tool() != Tool::Node {
+        return None;
+    }
+
+    if let Some(standalone) = node_hit.standalone {
+        Some(NodeContext::Standalone(standalone))
+    } else if let Some(connection) = node_hit.connection.clone() {
+        Some(NodeContext::Connection(connection))
+    } else if node_hit.handle.is_some() {
+        None
+    } else {
+        frame
+            .cursor
+            .map(|cursor| NodeContext::Pick(coord, cursor_in_map_view(cursor, frame.layout.scale)))
+    }
+}
+
+fn apply_context_menu(
+    ui: &Ui, session: &mut Session, frame: &mut ViewFrame<'_>, node_hit: &NodeOverlayHit, coord: Coord,
+) {
+    let atoms = session
+        .state
+        .active_document()
+        .map(|document| document.instance_ids_at(coord).to_vec())
+        .unwrap_or_default();
+    let node = node_context_menu(session, frame, node_hit, coord);
+    let is_block_selected = session.tool() == Tool::BlockSelect
+        && session
+            .selection()
+            .is_some_and(|selection| session.selection_mode().includes(selection, coord));
+    *frame.context = Some(MenuTarget {
+        document: frame.id,
+        coord,
+        atoms,
+        node,
+        block_selected: is_block_selected,
+        replace_for: None,
+        replace_query: String::new(),
+    });
+    ui.open_popup(MAP_MENU_POPUP);
+}
+
 pub(super) fn apply_right_click(
     ui: &Ui, session: &mut Session, frame: &mut ViewFrame<'_>, node_hit: &NodeOverlayHit, coord: Coord,
 ) {
-    match node_right_click(session.tool(), ui.io().key_shift(), node_hit) {
-        NodeRightClick::DeleteStandalone(node) => {
-            session.delete_standalone_node(node);
-        },
-        NodeRightClick::DeleteConnection(connection) => {
-            session.delete_node_connection(connection);
-        },
-        NodeRightClick::Menu => {
-            let atoms = session
-                .state
-                .active_document()
-                .map(|document| document.instance_ids_at(coord).to_vec())
-                .unwrap_or_default();
-            let node = if session.tool() == Tool::Node {
-                if let Some(standalone) = node_hit.standalone {
-                    Some(NodeContext::Standalone(standalone))
-                } else if let Some(connection) = node_hit.connection.clone() {
-                    Some(NodeContext::Connection(connection))
-                } else if node_hit.handle.is_some() {
-                    None
-                } else {
-                    frame
-                        .cursor
-                        .map(|cursor| NodeContext::Pick(coord, cursor_in_map_view(cursor, frame.layout.scale)))
-                }
-            } else {
-                None
-            };
-            let is_block_selected = session.tool() == Tool::BlockSelect
-                && session
-                    .selection()
-                    .is_some_and(|selection| session.selection_mode().includes(selection, coord));
-            *frame.context = Some(MenuTarget {
-                document: frame.id,
-                coord,
-                atoms,
-                node,
-                block_selected: is_block_selected,
-                replace_for: None,
-                replace_query: String::new(),
-            });
-            ui.open_popup(MAP_MENU_POPUP);
-        },
+    // node right clicks are prioritized over context menu, so they can be deleted first before context menu is open
+    if let Some(right_click) = node_right_click(session.tool(), ui.io().key_shift(), node_hit) {
+        match right_click {
+            NodeRightClick::DeleteStandalone(node) => {
+                session.delete_standalone_node(node);
+            },
+            NodeRightClick::DeleteConnection(connection) => {
+                session.delete_node_connection(connection);
+            },
+        }
+
+        return;
     }
+
+    apply_context_menu(ui, session, frame, node_hit, coord);
 }
 
 pub(super) fn drive_node_tool(

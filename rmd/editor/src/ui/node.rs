@@ -19,21 +19,20 @@ pub(super) struct NodeOverlayHit {
 pub(super) enum NodeRightClick<'a> {
     DeleteStandalone(Coord),
     DeleteConnection(&'a [Coord]),
-    Menu,
 }
 
-pub(super) fn node_right_click(tool: Tool, shift: bool, hit: &NodeOverlayHit) -> NodeRightClick<'_> {
+pub(super) fn node_right_click(tool: Tool, shift: bool, hit: &NodeOverlayHit) -> Option<NodeRightClick<'_>> {
     if tool == Tool::Node && !shift {
         if let Some(coord) = hit.standalone {
-            return NodeRightClick::DeleteStandalone(coord);
+            return Some(NodeRightClick::DeleteStandalone(coord));
         }
 
         if let Some(connection) = hit.connection.as_deref() {
-            return NodeRightClick::DeleteConnection(connection);
+            return Some(NodeRightClick::DeleteConnection(connection));
         }
     }
 
-    NodeRightClick::Menu
+    None
 }
 
 pub(super) struct NodeOverlayView<'a> {
@@ -266,24 +265,15 @@ mod tests {
         };
 
         assert!(matches!(
-            node_right_click(Tool::Node, false, &connected),
+            node_right_click(Tool::Node, false, &connected).unwrap(),
             NodeRightClick::DeleteConnection(target) if target == connection
         ));
         assert!(matches!(
-            node_right_click(Tool::Node, false, &standalone),
+            node_right_click(Tool::Node, false, &standalone).unwrap(),
             NodeRightClick::DeleteStandalone(target) if target == node
         ));
-        assert!(matches!(
-            node_right_click(Tool::Node, true, &connected),
-            NodeRightClick::Menu
-        ));
-        assert!(matches!(
-            node_right_click(Tool::Node, false, &NodeOverlayHit::default()),
-            NodeRightClick::Menu
-        ));
-        assert!(matches!(
-            node_right_click(Tool::Select, false, &connected),
-            NodeRightClick::Menu
-        ));
+        assert!(node_right_click(Tool::Node, true, &connected).is_none());
+        assert!(node_right_click(Tool::Node, false, &NodeOverlayHit::default()).is_none());
+        assert!(node_right_click(Tool::Select, false, &connected).is_none());
     }
 }
