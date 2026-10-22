@@ -14,6 +14,7 @@ pub(super) use self::{
     presence::{CoopPresence, FollowedView},
     shortcuts::MomentaryTool,
     stroke::{ActivePlacementFlash, PickStroke, PlacementStroke},
+    tools::MoveDrag,
 };
 use self::{
     hover::draw_tile_hover,
@@ -543,6 +544,10 @@ impl UiState {
         if self.gizmo_context != Some(gizmo_context) {
             self.gizmo.cancel();
             self.gizmo_context = Some(gizmo_context);
+        }
+
+        if tool != Tool::Move {
+            self.move_drag = None;
         }
 
         if frame

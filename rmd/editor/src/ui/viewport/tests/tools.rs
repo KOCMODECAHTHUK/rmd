@@ -448,3 +448,178 @@ fn the_alternate_delete_drag_clears_each_tile_in_one_undo_step_with_any_bound_ke
         }
     }
 }
+
+#[test]
+fn move_tool_selects_on_press_and_moves_only_the_picked_atom() {
+    let _guard = IMGUI_CONTEXT.lock().unwrap();
+    let mut app = RectangleUiHarness::new();
+    let table = Prefab::new(TreePath::parse("/obj/structure/table"));
+    let light = Prefab::new(TreePath::parse("/obj/machinery/light"));
+    app.session.set_tool(Tool::Place);
+    app.session.state.choose_prefab(table.clone());
+    let table_id = app.session.place_at(Coord::new(5, 8, 1), None).unwrap();
+    app.session.state.choose_prefab(light.clone());
+    let light_id = app.session.place_at(Coord::new(6, 8, 1), None).unwrap();
+    app.session.set_tool(Tool::Move);
+
+    // a press asks for a Move pick instead of editing anything
+    app.pointer(app.tile(5, 8), true);
+    assert_eq!(app.interaction.mode.pick(), Some(PickRequest::Move));
+
+    // the pick result lands after the frame, which selects the atom in the inspector
+    app.session.pick_instance(Some(table_id));
+    assert_eq!(app.session.picked_instance(), Some(table_id));
+
+    // holding the button anchors a drag, and moving the pointer carries the atom along
+    app.pointer(app.tile(5, 8), true);
+    app.pointer(app.tile(7, 10), true);
+    app.pointer(app.tile(7, 10), false);
+
+    let document = app.session.state.active_document().unwrap();
+    assert_eq!(
+        document.instance_location(table_id).map(|location| location.coord),
+        Some(Coord::new(7, 10, 1)),
+    );
+    assert_eq!(
+        document.instance_location(light_id).map(|location| location.coord),
+        Some(Coord::new(6, 8, 1)),
+        "the drag moves only the picked atom"
+    );
+    assert_eq!(app.session.picked_instance(), Some(table_id));
+    let paths = document
+        .map
+        .tile_at(Coord::new(7, 10, 1))
+        .unwrap()
+        .iter()
+        .map(|prefab| prefab.path.to_string())
+        .collect::<Vec<_>>();
+    assert_eq!(paths, ["/obj/structure/table", "/turf/open/floor", "/area/station"]);
+
+    // the whole drag is one undo step
+    assert_eq!(app.session.undo_label(), Some("move atom"));
+    assert!(app.session.undo());
+    let document = app.session.state.active_document().unwrap();
+    assert!(document.map.tile_at(Coord::new(5, 8, 1)).unwrap().contains(&table));
+    assert!(!document.map.tile_at(Coord::new(7, 10, 1)).unwrap().contains(&table));
+}
+
+#[test]
+fn move_tool_sub_tile_drag_edits_nothing() {
+    let _guard = IMGUI_CONTEXT.lock().unwrap();
+    let mut app = RectangleUiHarness::new();
+    let table = Prefab::new(TreePath::parse("/obj/structure/table"));
+    app.session.set_tool(Tool::Place);
+    app.session.state.choose_prefab(table.clone());
+    let table_id = app.session.place_at(Coord::new(5, 8, 1), None).unwrap();
+    app.session.set_tool(Tool::Move);
+
+    app.pointer(app.tile(5, 8), true);
+    app.session.pick_instance(Some(table_id));
+    app.pointer(app.tile(5, 8), true);
+
+    let mut near = app.tile(5, 8);
+    near[0] += 10.0;
+    app.pointer(near, true);
+    app.pointer(near, false);
+
+    let document = app.session.state.active_document().unwrap();
+    assert_eq!(
+        document.instance_location(table_id).map(|location| location.coord),
+        Some(Coord::new(5, 8, 1)),
+        "a sub-tile drag keeps the atom on its tile"
+    );
+    assert_eq!(
+        app.session
+            .picked_prefab()
+            .and_then(|prefab| prefab.var(&"pixel_x".into())),
+        None,
+        "a sub-tile drag does not edit pixel offsets"
+    );
+    assert_ne!(
+        app.session.undo_label(),
+        Some("move atom"),
+        "a sub-tile drag records no move"
+    );
+}
+
+#[test]
+fn move_tool_drag_moves_whole_tiles_and_keeps_pixel_offsets() {
+    let _guard = IMGUI_CONTEXT.lock().unwrap();
+    let mut app = RectangleUiHarness::new();
+    let table = Prefab::new(TreePath::parse("/obj/structure/table"));
+    app.session.set_tool(Tool::Place);
+    app.session.state.choose_prefab(table.clone());
+    let table_id = app.session.place_at(Coord::new(5, 8, 1), None).unwrap();
+    app.session.set_tool(Tool::Move);
+
+    app.pointer(app.tile(5, 8), true);
+    app.session.pick_instance(Some(table_id));
+    app.pointer(app.tile(5, 8), true);
+
+    let mut far = app.tile(5, 8);
+    far[0] += 20.0;
+    app.pointer(far, true);
+    app.pointer(far, false);
+
+    let document = app.session.state.active_document().unwrap();
+    assert_eq!(
+        document.instance_location(table_id).map(|location| location.coord),
+        Some(Coord::new(6, 8, 1)),
+        "a drag past half a tile crosses whole tiles"
+    );
+    assert_eq!(
+        app.session
+            .picked_prefab()
+            .and_then(|prefab| prefab.var(&"pixel_x".into())),
+        None,
+        "a whole-tile drag keeps the original offsets"
+    );
+
+    assert!(app.session.undo());
+    let document = app.session.state.active_document().unwrap();
+    assert!(document.map.tile_at(Coord::new(5, 8, 1)).unwrap().contains(&table));
+    assert!(!document.map.tile_at(Coord::new(6, 8, 1)).unwrap().contains(&table));
+}
+
+#[test]
+fn move_tool_drag_back_to_the_origin_tile_returns_the_atom() {
+    let _guard = IMGUI_CONTEXT.lock().unwrap();
+    let mut app = RectangleUiHarness::new();
+    let table = Prefab::new(TreePath::parse("/obj/structure/table"));
+    app.session.set_tool(Tool::Place);
+    app.session.state.choose_prefab(table.clone());
+    let table_id = app.session.place_at(Coord::new(5, 8, 1), None).unwrap();
+    app.session.set_tool(Tool::Move);
+
+    app.pointer(app.tile(5, 8), true);
+    app.session.pick_instance(Some(table_id));
+    app.pointer(app.tile(5, 8), true);
+
+    let mut far = app.tile(5, 8);
+    far[0] += 20.0;
+    app.pointer(far, true);
+
+    let document = app.session.state.active_document().unwrap();
+    assert_eq!(
+        document.instance_location(table_id).map(|location| location.coord),
+        Some(Coord::new(6, 8, 1)),
+        "the drag first crosses one whole tile"
+    );
+
+    // dragging back over the origin tile returns the atom before the button is released
+    app.pointer(app.tile(5, 8), true);
+    app.pointer(app.tile(5, 8), false);
+
+    let document = app.session.state.active_document().unwrap();
+    assert_eq!(
+        document.instance_location(table_id).map(|location| location.coord),
+        Some(Coord::new(5, 8, 1)),
+        "dragging back to the origin tile returns the atom"
+    );
+    // the drag crossed out and back with no net effect, so history has no move to undo
+    assert_ne!(
+        app.session.undo_label(),
+        Some("move atom"),
+        "an out-and-back drag leaves no undo entry"
+    );
+}

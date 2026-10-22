@@ -661,7 +661,7 @@ impl GizmoState {
     }
 }
 
-fn transform_values(target: PickedTransform, mode: TransformMode) -> Option<[i32; 2]> {
+pub(crate) fn transform_values(target: PickedTransform, mode: TransformMode) -> Option<[i32; 2]> {
     match mode {
         TransformMode::Pixel => Some(target.pixel),
         TransformMode::Step if target.is_movable => Some(target.step),
@@ -1106,7 +1106,7 @@ fn anchored_values(
     (anchored.coord, next)
 }
 
-fn transform_mutations(mode: TransformMode, current: [i32; 2], next: [i32; 2]) -> Vec<VarMutation> {
+pub(crate) fn transform_mutations(mode: TransformMode, current: [i32; 2], next: [i32; 2]) -> Vec<VarMutation> {
     let (x_name, y_name) = mode.variables();
     let mut mutations = Vec::with_capacity(2);
     if next[0] != current[0] {

@@ -8,17 +8,23 @@ use super::{
     stroke::{ActivePlacementFlash, PickStroke, PlacementStroke},
 };
 use crate::{
-    gizmo::GizmoMapView,
-    session::{FillOutcome, Session},
+    gizmo::{GizmoMapView, transform_mutations, transform_values},
+    session::{FillOutcome, PickedTransform, Session},
     settings::{KeybindAction, Settings},
+    transform::anchor_to_tile,
     ui::{
-        FILL_LIMIT_WARNING_POPUP, FillWarningContext, NodeOverlayView, NodeRightClick, PendingFillWarning, UiState,
+        FILL_LIMIT_WARNING_POPUP, FillWarningContext, NodeOverlayView, NodeRightClick, PendingFillWarning,
+        TransformMode, UiState,
         context_menu::{NodeContext, POPUP as MAP_MENU_POPUP, Target as MenuTarget},
         coop::{COMMENT_POPUP, CommentDraft},
         draw_node_overlay,
         node::NodeOverlayHit,
         node_right_click,
     },
+};
+use editor::{
+    command::EditGroupId,
+    document::{DocumentId, PrefabInstanceId},
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -43,10 +49,10 @@ impl Clicks {
 pub(super) fn configure_tool_interaction(tool: Tool, interaction: &mut MapViewInteraction) {
     interaction.mode = match (tool, interaction.mode) {
         (Tool::Place | Tool::Select | Tool::Fill | Tool::RectFill, _) => InteractionMode::Place,
-        (Tool::Pick | Tool::Replace, InteractionMode::Pick { pick }) => InteractionMode::Pick { pick },
+        (Tool::Pick | Tool::Replace | Tool::Move, InteractionMode::Pick { pick }) => InteractionMode::Pick { pick },
         (Tool::Node, InteractionMode::Node { pick }) => InteractionMode::Node { pick },
         (Tool::Delete, InteractionMode::Delete { pick }) => InteractionMode::Delete { pick },
-        (Tool::Pick | Tool::Replace | Tool::Comment, _) => InteractionMode::Pick { pick: None },
+        (Tool::Pick | Tool::Replace | Tool::Comment | Tool::Move, _) => InteractionMode::Pick { pick: None },
         (Tool::Node, _) => InteractionMode::Node { pick: None },
         (Tool::Delete, _) => InteractionMode::Delete { pick: None },
     };
@@ -58,14 +64,14 @@ pub(super) fn configure_tool_interaction(tool: Tool, interaction: &mut MapViewIn
         Tool::Delete | Tool::Replace => {
             interaction.picked = None;
         },
-        Tool::Pick | Tool::Node => {},
+        Tool::Pick | Tool::Node | Tool::Move => {},
     }
 }
 
 pub(super) fn interaction_mode(tool: Tool) -> InteractionMode {
     match tool {
         Tool::Place | Tool::Select | Tool::Fill | Tool::RectFill => InteractionMode::Place,
-        Tool::Pick | Tool::Replace | Tool::Comment => InteractionMode::Pick { pick: None },
+        Tool::Pick | Tool::Replace | Tool::Comment | Tool::Move => InteractionMode::Pick { pick: None },
         Tool::Node => InteractionMode::Node { pick: None },
         Tool::Delete => InteractionMode::Delete { pick: None },
     }
@@ -224,7 +230,7 @@ impl UiState {
                     .captures_mouse
             },
             Tool::Select => self.draw_region_gizmo(ui, session, frame, gizmo_view),
-            Tool::Node | Tool::Comment | Tool::Delete | Tool::Replace | Tool::Fill | Tool::RectFill => {
+            Tool::Node | Tool::Comment | Tool::Delete | Tool::Replace | Tool::Fill | Tool::RectFill | Tool::Move => {
                 self.gizmo.cancel();
 
                 false
@@ -288,6 +294,7 @@ impl UiState {
             Tool::Delete | Tool::Replace => self.pick_at(ui, session, frame, coord, pixel, clicks, is_alternate),
             Tool::Fill => self.fill_at(ui, session, coord, clicks.is_left_clicked),
             Tool::RectFill => self.start_fill_rect(session, frame, coord, clicks.is_left_clicked),
+            Tool::Move => self.move_at(ui, session, frame, clicks),
         }
     }
 
@@ -375,5 +382,129 @@ impl UiState {
             });
             ui.open_popup(FILL_LIMIT_WARNING_POPUP);
         }
+    }
+
+    fn move_at(&mut self, ui: &Ui, session: &mut Session, frame: &mut ViewFrame<'_>, clicks: Clicks) {
+        if clicks.is_left_clicked {
+            self.move_drag = None;
+            request_pick(frame.interaction, PickRequest::Move);
+        }
+
+        if !clicks.is_left_down {
+            self.move_drag = None;
+            return;
+        }
+
+        if let Some(drag) = self.move_drag.as_ref()
+            && (drag.document != frame.id || drag.z != session.z() || session.picked_instance() != Some(drag.picked))
+        {
+            self.move_drag = None;
+        }
+
+        let mode = self.inspector.transform_mode();
+        let target = session
+            .picked_transform()
+            .filter(|target| target.sprite.z == session.z());
+
+        let Some(drag) = self.move_drag.as_ref() else {
+            let Some(target) = target else {
+                return;
+            };
+            let Some(values) = transform_values(target, mode) else {
+                return;
+            };
+            let Some(location) = session.picked_location() else {
+                return;
+            };
+
+            self.move_drag = Some(MoveDrag {
+                document: frame.id,
+                z: session.z(),
+                picked: target.picked,
+                start_mouse: ui.io().mouse_pos(),
+                start_anchor: [target.sprite.x, target.sprite.y],
+                start_values: values,
+                start_coord: location.coord,
+                zoom: frame.camera.camera.zoom.max(f32::EPSILON),
+                tile_size: session.options.tile_size.max(1),
+                group: EditGroupId::new(),
+            });
+
+            return;
+        };
+
+        let Some(target) = target else {
+            return;
+        };
+        drive_move_drag(ui, session, drag, target, mode);
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(in crate::ui) struct MoveDrag {
+    pub(in crate::ui) document: DocumentId,
+    z: u32,
+    picked: PrefabInstanceId,
+    start_mouse: [f32; 2],
+    start_anchor: [f32; 2],
+    start_values: [i32; 2],
+    start_coord: Coord,
+    zoom: f32,
+    tile_size: u32,
+    group: EditGroupId,
+}
+
+struct DraggedMove {
+    values: [i32; 2],
+    anchor: [f32; 2],
+}
+
+fn dragged_move(drag: &MoveDrag, mouse: [f32; 2]) -> DraggedMove {
+    let map_delta = [
+        (mouse[0] - drag.start_mouse[0]) / drag.zoom,
+        -(mouse[1] - drag.start_mouse[1]) / drag.zoom,
+    ];
+    let tile = drag.tile_size as f32;
+    let mut anchor = drag.start_anchor;
+    let mut values = drag.start_values;
+
+    for axis in 0..2 {
+        let tiles = rounded_i32(map_delta[axis] / tile);
+        anchor[axis] += tiles as f32 * tile;
+        values[axis] = drag.start_values[axis].saturating_add(tiles.saturating_mul(drag.tile_size as i32));
+    }
+
+    DraggedMove { values, anchor }
+}
+
+fn rounded_i32(value: f32) -> i32 {
+    if value.is_finite() { value.round() as i32 } else { 0 }
+}
+
+fn drive_move_drag(ui: &Ui, session: &mut Session, drag: &MoveDrag, target: PickedTransform, mode: TransformMode) {
+    let mouse = ui.io().mouse_pos();
+    if !mouse.iter().all(|value| value.is_finite()) {
+        return;
+    }
+
+    let Some(location) = session.picked_location() else {
+        return;
+    };
+    let size = session
+        .map()
+        .map_or((1, 1), |map| (map.size().x.max(1), map.size().y.max(1)));
+    let dragged = dragged_move(drag, mouse);
+    let anchored = anchor_to_tile(dragged.anchor, drag.start_coord, drag.tile_size, size);
+    let next = [
+        dragged.values[0].saturating_add(anchored.adjust[0]),
+        dragged.values[1].saturating_add(anchored.adjust[1]),
+    ];
+    let current = transform_values(target, mode).unwrap_or(drag.start_values);
+    let mutations = transform_mutations(mode, current, next);
+
+    if anchored.coord != location.coord {
+        session.move_picked_instance(anchored.coord, "move atom", &mutations, Some(drag.group));
+    } else if !mutations.is_empty() {
+        session.edit_picked_instance_vars("move atom", &mutations, Some(drag.group));
     }
 }
